@@ -1,7 +1,7 @@
 {
   "name": "external-review",
   "version": "0.1.0",
-  "description": "One button above the prompt that starts an external review with Codex or Gemini, to convergence or at a chosen effort.",
+  "description": "One button above the prompt that starts an external review with Codex or Gemini, one round or to convergence.",
   "author": {
     "name": "Koen van der Heide",
     "url": "https://github.com/koenvdheide"
