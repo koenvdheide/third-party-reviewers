@@ -4,13 +4,12 @@ A [Claude Code](https://claude.ai/code) mod that puts one button above the promp
 
 ## What it does
 
-The row above the prompt carries a single `External review` button. Pressing it asks three questions and then submits the instruction as if you had typed it:
+The row above the prompt carries a single `External review` button. Pressing it asks two questions and then submits the instruction as if you had typed it:
 
 - **Reviewer** — Codex, or Gemini through the Antigravity CLI.
 - **Depth** — to convergence, carrying prior findings forward each round, or one round.
-- **Effort** — the levels that reviewer actually accepts.
 
-The reviewer is asked first because the two effort vocabularies differ: Codex takes a reasoning-effort level, and Antigravity takes it as a suffix on the model id, where the Pro line has fewer levels than Flash.
+The instruction names no reasoning effort. The reviewing skill picks one from the mode and the difficulty of the artifact, which is a judgement a menu cannot make.
 
 Nothing in the instruction names a diff. The target is whatever is salient in the session, so pressing it while you are on a spec, a plan or a decision reviews that instead.
 
