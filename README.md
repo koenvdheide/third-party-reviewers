@@ -1,6 +1,6 @@
 # external-review
 
-A [Claude Code](https://claude.ai/code) mod that puts one button above the prompt and turns a press into an external review, by Codex or by Gemini, at a depth and effort you pick.
+A [Claude Code](https://claude.ai/code) mod that puts one button above the prompt and turns a press into an external review, by Codex or by Gemini, at a depth you pick.
 
 ## What it does
 
