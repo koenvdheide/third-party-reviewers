@@ -5,8 +5,10 @@ Codex and Gemini reviews inside [Claude Code](https://claude.ai/code). Claude st
 ## What it does
 
 - `review_start`, `review_results` and `review_cancel`: the tools Claude uses to run a review in the background, read the result and stop a run.
+- `review_record`: Claude records what it did with each finding, with its evidence: applied, rejected or unresolved. Each finding also gets a quick textual check of the file, line and symbol it cites.
+- The findings pane, from `findings` above the prompt: every review in the conversation, each finding with Claude's judgement. Apply or Reject overrules it, and Ask starts a question about a finding.
 - The `/codex` and `/antigravity` skills tell Claude when to review, which mode to use and how to treat the findings.
-- The External review button above the prompt starts a review, one round or to convergence.
+- `review` above the prompt starts a review, one round or to convergence.
 
 A review that finishes during a busy turn waits for that turn to end; if you `/clear` first, its notification still arrives in the new conversation.
 
@@ -23,7 +25,7 @@ A review that finishes during a busy turn waits for that turn to end; if you `/c
 /reload-plugins
 ```
 
-It replaces the `codex` and `antigravity` plugins, so uninstall those. Keep `codex` while you use `orchestrated-build-flow`, which depends on it.
+It replaces the `codex` and `antigravity` plugins, so uninstall those. An `orchestrated-build-flow` older than 1.2.0 still depends on `codex`, so update that first.
 
 ## What it runs and sends
 

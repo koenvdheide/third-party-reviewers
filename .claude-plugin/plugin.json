@@ -1,7 +1,7 @@
 {
   "name": "third-party-reviewers",
-  "version": "0.2.0",
-  "description": "Independent reviews from Codex and Gemini inside Claude Code: Claude runs the CLI through one review tool, with live status and a cancel that stops it.",
+  "version": "0.3.0",
+  "description": "Independent reviews from Codex and Gemini inside Claude Code: Claude runs the CLI through review tools, with live status, a cancel that stops it, and a findings pane where you can overrule what Claude decided.",
   "author": {
     "name": "Koen van der Heide",
     "url": "https://github.com/koenvdheide"
