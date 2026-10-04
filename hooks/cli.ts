@@ -1,7 +1,8 @@
-import type { Finding, Reviewer } from '../types'
+import type { Reviewer } from '../types'
 
 export type Exe = { argv: readonly string[]; env?: Record<string, string> }
-export type Review = { verdict: string; response: string; findings: Finding[] }
+export type RawFinding = { severity: string; title: string; claim: string; file: string | null; line: number | null; symbol: string | null }
+export type Review = { verdict: string; response: string; findings: RawFinding[] }
 export type Outcome = { review: Review | null; failure: string | null; deniedSteps: string[] }
 export type Parser = { line: (event: unknown) => string | null; finish: (exitCode: number | null) => Outcome }
 
@@ -122,7 +123,7 @@ export function validateReview(value: unknown): { review: Review } | { error: st
   if (typeof value.verdict !== 'string' || typeof value.response !== 'string' || !Array.isArray(value.findings)) {
     return { error: 'verdict and response must be strings and findings an array' }
   }
-  const findings: Finding[] = []
+  const findings: RawFinding[] = []
   for (const f of value.findings) {
     if (!isObject(f) || !exactKeys(f, FINDING_KEYS)) return { error: 'each finding must have exactly severity, title, claim, file, line and symbol' }
     if (typeof f.severity !== 'string' || !SEVERITIES.includes(f.severity)) return { error: `unknown severity ${String(f.severity)}` }

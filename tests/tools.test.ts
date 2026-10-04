@@ -16,18 +16,19 @@ describe('runs', () => {
   test('clean codex run: native binary, complete, one delivery', async ($, on) => {
     const w = world(on)
     w.files.set('C:/work/a.ts', 'x')
-    w.scripts.push({ lines: codexReview([finding({ file: 'a.ts', line: 2, symbol: 'add' }), finding({ severity: 'other' })]) })
+    w.scripts.push({ lines: codexReview([finding({ file: 'a.ts', line: 2, symbol: 'add' }), finding({ severity: 'other' }), finding({ file: '//server/share/a.ts', line: 1, symbol: null })]) })
     await boot($, w)
     const id = await startOf($, { ...start, artifact: { files: ['C:/work/a.ts'] } })
     await w.clock.settle()
     const r = await resultOf($, id)
     expect(id).toMatch(/^r-[0-9a-f]{8}$/)
     expect(r.status).toBe('complete')
-    expect(r.findings.length).toBe(2)
+    expect(r.findings.map((f: any) => f.id)).toEqual([`${id}.1`, `${id}.2`, `${id}.3`])
+    expect(r.findings.map((f: any) => f.citation)).toEqual(['line-out-of-range', 'no-location', 'not-checked'])
     expect(typeof r.durationMs).toBe('number')
     expect(w.spawns[0]?.argv[0]).toBe(CODEX_EXE)
     expect(w.spawns[0]?.cwd).toBe('C:/work')
-    expect(w.submitted).toEqual([`[third-party-reviewers] Review ${id} (Codex red-team) finished: 2 findings, 1 breakage. Read it with review_results ${id} before acting on it.`])
+    expect(w.submitted).toEqual([`[third-party-reviewers] Review ${id} (Codex red-team) finished: 3 findings, 2 breakage. Read it with review_results ${id} before acting on it.`])
   })
 
   test('non-zero exit fails and still delivers', async ($, on) => {
@@ -134,6 +135,13 @@ describe('runs', () => {
     expect(w.removed).toEqual(['C:/tmp/tpr/third-party-reviewers/r1'])
   })
 
+  test('0.2.0 findings get ids and statuses at load', async ($, on) => {
+    const w = world(on)
+    w.seed([{ id: 'r2', reviewer: 'codex', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: 1, status: 'complete', response: 'r', verdict: 'v', findings: [{ severity: 'breakage', title: 't', claim: 'c', file: null, line: null, symbol: null }], deniedSteps: [], failure: null }])
+    await boot($, w)
+    expect((await resultOf($, 'r2')).findings[0]).toMatchObject({ id: 'r2.1', citation: 'not-checked', status: 'unresolved', overrule: null })
+  })
+
   test('a codex.exe on PATH runs directly', async ($, on) => {
     const w = world(on, { nativeCodex: 'C:\\bin\\codex.exe' })
     w.scripts.push({ lines: codexReview([]) })
@@ -150,6 +158,23 @@ describe('runs', () => {
     const [a, b] = await Promise.all([startOf($), startOf($)])
     expect(a).not.toBe(b)
     await endSession($)
+  })
+})
+
+describe('records', () => {
+  test('concurrent records both land; unknown and bad status refused', async ($, on) => {
+    const w = world(on)
+    w.scripts.push({ lines: codexReview([finding({}), finding({ title: 'second' })]) })
+    await boot($, w)
+    const id = await startOf($)
+    await w.clock.settle()
+    await Promise.all([
+      call($, 'review_record', { findingId: `${id}.1`, status: 'applied', evidence: 'fixed' }),
+      call($, 'review_record', { findingId: `${id}.2`, status: 'rejected', evidence: 'contradicted' }),
+    ])
+    expect((await resultOf($, id)).findings.map((f: any) => [f.status, f.evidence])).toEqual([['applied', 'fixed'], ['rejected', 'contradicted']])
+    expect((await call($, 'review_record', { findingId: 'r-00000000.1', status: 'applied', evidence: 'x' })).deny).toContain('no finding')
+    expect((await call($, 'review_record', { findingId: `${id}.1`, status: 'done', evidence: 'x' })).deny).toContain('one of')
   })
 })
 

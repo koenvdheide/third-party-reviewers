@@ -1,9 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Reviewer, Run } from '../types'
+import type { Finding, FindingStatus, Reviewer, Run } from '../types'
 import { CODEX_MODEL, EFFORTS, Lines, NAME, SAFE_ID, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash } from './cli'
-import type { Exe, Outcome, Parser } from './cli'
+import type { Exe, Outcome, Parser, RawFinding } from './cli'
+import { STATUSES, applyOverrule, applyRecord, citationOf, findingOf, outcome, overrulePrompt } from './findings'
+import type { RecordResult } from './findings'
+import { PANE, paneTree } from './pane'
 
 // Everything that calls the engine lives in this file: the mod loader follows `$` only into
 // functions declared here, never across an import. cli.ts holds the pure parts.
@@ -14,10 +17,13 @@ type Installed = { codex: Exe | null; gemini: { exe: Exe; flash: string } | null
 
 const T = <N extends string>(name: N) => `mcp__third-party-reviewers__${name}` as const
 const BUTTON = 'external-review'
+const FINDINGS = 'findings'
 const ENDED = 'The conversation changed before the review could start.'
 const ABSOLUTE = /^(?:[A-Za-z]:[\\/]|\/)/
 
 const runs = atom({ plugin: 'third-party-reviewers', key: 'runs' } as const, [])
+// The finding the pane has open, if any.
+const selected = atom({ plugin: 'third-party-reviewers', key: 'selected' } as const, null)
 
 let installed: Installed | null = null
 const progress = new Map<string, { label: string; startedAt: number; activity: string }>()
@@ -27,6 +33,9 @@ const cancelled = new Set<string>()
 // /clear ended never delivers into the next conversation.
 let generation = 0
 let ticker: { cancel: () => void } | null = null
+// Accepted overrule instructions per finding, numbered in the order Claude accepted them.
+const accepted = new Map<string, number>()
+let acceptances = 0
 
 async function works($: Engine, exe: Exe, args: string[]): Promise<string | null> {
   try {
@@ -192,7 +201,8 @@ async function startRun($: Engine, req: StartRequest, gen: number): Promise<Run>
     tick($)
     const target = req.files.length > 0 ? req.files.map(f => f.split(/[\\/]/).pop()).join(', ') : 'inline text'
     $.ui.toast(`${label} started on ${target}`)
-    void consume($, run, stream, parser, runDir, gen)
+    // Citations resolve against the reviewer's own working directory.
+    void consume($, run, stream, parser, runDir, runDir ?? root, gen)
     return run
   } catch (err) {
     if (runDir !== null) await removeDir($, runDir)
@@ -203,7 +213,24 @@ async function startRun($: Engine, req: StartRequest, gen: number): Promise<Run>
   }
 }
 
-async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runDir: string | null, gen: number): Promise<void> {
+async function toFindings($: Engine, runId: string, raw: RawFinding[], root: string): Promise<Finding[]> {
+  return Promise.all(
+    raw.map(async (f, i) => {
+      let text: string | null | undefined = null
+      if (f.file !== null) {
+        const path = ABSOLUTE.test(f.file) ? f.file : `${root}/${f.file}`
+        text = await $.fs.read(path).then(
+          t => (typeof t === 'string' ? t : undefined),
+          // exists rejects a network location; that citation goes unchecked
+          async () => ((await $.fs.exists(path).catch(() => true)) ? undefined : null),
+        )
+      }
+      return { id: `${runId}.${i + 1}`, ...f, citation: citationOf(f, text), status: 'unresolved' as const, evidence: null, overrule: null }
+    }),
+  )
+}
+
+async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runDir: string | null, citeRoot: string, gen: number): Promise<void> {
   const lines = new Lines()
   const note = (line: string) => {
     let event: unknown
@@ -229,9 +256,9 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
   stoppers.delete(run.id)
   const wasCancelled = cancelled.delete(run.id)
   const outcome: Outcome = wasCancelled ? { review: null, failure: null, deniedSteps: [] } : parser.finish(exit?.code ?? null)
+  const findings = outcome.review && gen === generation ? await toFindings($, run.id, outcome.review.findings, citeRoot) : []
   if (runDir !== null) await removeDir($, runDir)
 
-  const findings = outcome.review?.findings ?? []
   const status = wasCancelled ? 'cancelled' : outcome.review ? 'complete' : 'failed'
   const endedAt = await $.clock.now()
   if (gen !== generation) return
@@ -265,13 +292,21 @@ async function cancelRun(id: string): Promise<boolean> {
 }
 
 // After a reload the children are gone with the old module, but `$.state` keeps their rows,
-// and a Gemini run's directory stays on disk.
+// and a Gemini run's directory stays on disk. Rows from 0.2.0 have findings without ids or
+// statuses; they get them here, unchecked.
 async function markOrphans($: Engine): Promise<void> {
   const orphans = (await read($, runs)).filter(r => r.status === 'running' && !stoppers.has(r.id))
   for (const r of orphans) if (r.reviewer === 'gemini') await removeDir($, await runDirOf($, r.id))
   const endedAt = await $.clock.now()
   await update($, runs, list =>
-    list.map(r => (orphans.some(o => o.id === r.id) ? { ...r, status: 'cancelled' as const, endedAt, failure: 'The plugin reloaded while this review ran, which ended it.' } : r)),
+    list.map(r => ({
+      ...r,
+      ...(orphans.some(o => o.id === r.id) ? { status: 'cancelled' as const, endedAt, failure: 'The plugin reloaded while this review ran, which ended it.' } : {}),
+      findings: r.findings.map((f, i): Finding => {
+        const found = 'id' in f ? f : { ...(f as RawFinding), id: `${r.id}.${i + 1}`, citation: 'not-checked' as const, status: 'unresolved' as const, evidence: null }
+        return 'overrule' in found ? (found as Finding) : { ...found, overrule: null }
+      }),
+    })),
   )
 }
 
@@ -285,6 +320,7 @@ async function endSession($: Engine): Promise<void> {
   await Promise.allSettled(stops.map(stop => stop()))
   $.ui.status(undefined)
   await update($, runs, () => [])
+  await update($, selected, () => null)
 }
 
 async function registerTools($: Engine, i: Installed): Promise<void> {
@@ -315,6 +351,11 @@ async function registerTools($: Engine, i: Installed): Promise<void> {
     },
   })
   await $.tool.register({ name: 'review_results', description: 'A review run: its status while running, or its full result.', inputSchema: { type: 'object', required: ['runId'], properties: { runId: { type: 'string' } } } })
+  await $.tool.register({
+    name: 'review_record',
+    description: 'Record what you did with one finding, with the evidence: applied (fixed and re-checked), rejected (the evidence contradicts it), or unresolved (open, or a question for the user). rejected also covers a finding the user decided against. The user may overrule you from the findings pane; a record that contradicts their overrule is refused.',
+    inputSchema: { type: 'object', required: ['findingId', 'status', 'evidence'], properties: { findingId: { type: 'string' }, status: { type: 'string', enum: [...STATUSES] }, evidence: { type: 'string' } } },
+  })
   await $.tool.register({ name: 'review_cancel', description: 'Stop a running review.', inputSchema: { type: 'object', required: ['runId'], properties: { runId: { type: 'string' } } } })
 }
 
@@ -390,6 +431,18 @@ export const register: Register = on => {
     return { result: JSON.stringify({ ...run, ...extra }, null, 2) }
   })
 
+  on('tool.call', { tool: T('review_record') }, async ($, e) => {
+    const input = e as unknown as { findingId: string; status: FindingStatus; evidence: string }
+    if (!STATUSES.includes(input.status)) return { deny: `Status must be one of ${STATUSES.join(', ')}.` }
+    let recorded = { ok: false, reason: 'not recorded' } as RecordResult
+    await update($, runs, list => {
+      const r = applyRecord(list, input.findingId, input.status, input.evidence)
+      recorded = r.result
+      return r.next
+    })
+    return recorded.ok ? { result: `Recorded ${input.findingId} as ${input.status}.` } : { deny: recorded.reason }
+  })
+
   on('tool.call', { tool: T('review_cancel') }, async ($, e) => {
     const { runId } = e as unknown as { runId: string }
     return (await cancelRun(runId)) ? { result: `Cancelled ${runId}.` } : { deny: `${runId} is not running.` }
@@ -426,13 +479,56 @@ export const register: Register = on => {
     return answered
   })
 
-  on('ui.render', { component: 'AbovePrompt' }, ($, e, next) => {
+  on('ui.press', { element: FINDINGS }, async ($, e) => {
+    await $.ui.open({ id: PANE, title: 'Review findings' })
+    return { element: e.element }
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => paneTree($.ui.resolve(e), await read($, runs), await read($, selected)))
+
+  // The pane shows Claude's judgement; the user overrules it. The instruction goes as the
+  // user's prompt, so Claude answers it, and the overrule is stored only once that prompt is
+  // accepted: a refused one changes nothing, and the stored overrule is always the last
+  // instruction Claude received. A stored overrule makes a contradicting review_record fail.
+  on('ui.press', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const answered = { element: e.element }
+    const [kind, id] = e.element.split('|')
+    if (!id) return answered
+    if (kind === 'pick') {
+      await update($, selected, current => (current === id ? null : id))
+    } else if (kind === 'apply' || kind === 'reject' || kind === 'withdraw') {
+      const overrule = kind === 'withdraw' ? null : kind
+      const finding = findingOf(await read($, runs), id)
+      if (finding === undefined || finding.overrule === overrule) return answered
+      // A refused prompt shows its reason to the user itself.
+      const sent = await $.prompt.submit({ text: overrulePrompt(id, overrule), asUser: true })
+      if (sent.drop !== undefined) return answered
+      const mine = ++acceptances
+      accepted.set(id, mine)
+      // Checked inside the change, which update reruns on a version miss: a write that lands
+      // after a newer accepted one leaves it alone.
+      await update($, runs, list => (accepted.get(id) === mine ? applyOverrule(list, id, overrule) : list))
+    } else if (kind === 'ask') {
+      const title = findingOf(await read($, runs), id)?.title ?? id
+      // insert, so a draft already in the box survives
+      const filled = await $.prompt.fill({ text: `About finding ${id} (${title}): `, mode: 'insert' })
+      if (!filled.isFilled) $.ui.toast('The prompt box is busy; try Ask again when it is free.')
+    }
+    return answered
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // Yield the row while the engine has a survey in it.
     if (e.props.hasSurvey) return next(e)
-    const { Box, Button } = $.ui.resolve(e)
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const all = await read($, runs)
+    const open = all.flatMap(r => r.findings).filter(f => outcome(f) === 'unresolved').length
+    // Quiet at rest: dim until pointed at, no chrome in a terminal (a desktop draws its own).
     return (
       <Box>
-        <Button key={BUTTON} label="External review" onPress={() => {}} />
+        <Button key={BUTTON} plain dimColor hotkey="r" label="review" onPress={() => {}} />
+        {all.length > 0 ? <Text dimColor> · </Text> : null}
+        {all.length > 0 ? <Button key={FINDINGS} plain dimColor hotkey="f" label={open > 0 ? `findings (${open} open)` : 'findings'} onPress={() => {}} /> : null}
       </Box>
     )
   })
