@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "response", "findings"],
+  "properties": {
+    "verdict": { "type": "string" },
+    "response": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "title", "claim", "file", "line", "symbol"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["breakage", "simplification", "other"] },
+          "title": { "type": "string" },
+          "claim": { "type": "string" },
+          "file": { "type": ["string", "null"] },
+          "line": { "type": ["integer", "null"] },
+          "symbol": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

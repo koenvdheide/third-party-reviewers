@@ -1,9 +1,13 @@
 {
-  "name": "external-review",
-  "version": "0.1.0",
-  "description": "One button above the prompt that starts an external review with Codex or Gemini, one round or to convergence.",
+  "name": "third-party-reviewers",
+  "version": "0.2.0",
+  "description": "Independent reviews from Codex and Gemini inside Claude Code: Claude runs the CLI through one review tool, with live status and a cancel that stops it.",
   "author": {
     "name": "Koen van der Heide",
     "url": "https://github.com/koenvdheide"
-  }
+  },
+  "homepage": "https://github.com/koenvdheide/third-party-reviewers",
+  "repository": "https://github.com/koenvdheide/third-party-reviewers",
+  "license": "MIT",
+  "types": "./types/index.d.ts"
 }
