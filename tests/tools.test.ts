@@ -159,6 +159,18 @@ describe('runs', () => {
     expect(a).not.toBe(b)
     await endSession($)
   })
+
+  test('a relative finding path is stored resolved against the review directory', async ($, on) => {
+    const w = world(on)
+    w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
+    w.scripts.push({ lines: codexReview([finding({ file: 'a.ts', line: 2, symbol: 'add' }), finding({ file: '//server/share/a.ts', line: 1 }), finding({ file: '\\\\server\\share\\a.ts', line: 1 }), finding({})]) })
+    await boot($, w)
+    const id = await startOf($)
+    await w.clock.settle()
+    const r = await resultOf($, id)
+    expect(r.findings.map((f: any) => f.file)).toEqual(['C:/work/a.ts', '//server/share/a.ts', '\\\\server\\share\\a.ts', null])
+    expect(r.findings[0].citation).toBe('ok')
+  })
 })
 
 describe('records', () => {

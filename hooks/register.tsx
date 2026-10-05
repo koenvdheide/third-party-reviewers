@@ -19,7 +19,7 @@ const T = <N extends string>(name: N) => `mcp__third-party-reviewers__${name}` a
 const BUTTON = 'external-review'
 const FINDINGS = 'findings'
 const ENDED = 'The conversation changed before the review could start.'
-const ABSOLUTE = /^(?:[A-Za-z]:[\\/]|\/)/
+const ABSOLUTE = /^(?:[A-Za-z]:[\\/]|[\\/])/
 
 const runs = atom({ plugin: 'third-party-reviewers', key: 'runs' } as const, [])
 // The finding the pane has open, if any.
@@ -216,16 +216,17 @@ async function startRun($: Engine, req: StartRequest, gen: number): Promise<Run>
 async function toFindings($: Engine, runId: string, raw: RawFinding[], root: string): Promise<Finding[]> {
   return Promise.all(
     raw.map(async (f, i) => {
+      const path = f.file === null ? null : ABSOLUTE.test(f.file) ? f.file : `${root}/${f.file}`
       let text: string | null | undefined = null
-      if (f.file !== null) {
-        const path = ABSOLUTE.test(f.file) ? f.file : `${root}/${f.file}`
+      if (path !== null) {
         text = await $.fs.read(path).then(
           t => (typeof t === 'string' ? t : undefined),
           // exists rejects a network location; that citation goes unchecked
           async () => ((await $.fs.exists(path).catch(() => true)) ? undefined : null),
         )
       }
-      return { id: `${runId}.${i + 1}`, ...f, citation: citationOf(f, text), status: 'unresolved' as const, evidence: null, overrule: null }
+      // The resolved path, so the finding still names its file once the session is gone.
+      return { id: `${runId}.${i + 1}`, ...f, file: path, citation: citationOf(f, text), status: 'unresolved' as const, evidence: null, overrule: null }
     }),
   )
 }
