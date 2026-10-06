@@ -27,6 +27,11 @@ Codex and Gemini reviews inside [Claude Code](https://claude.ai/code), with live
 
 Your local `codex`, read-only and with live web search, or `agy`, from a temporary directory as an agent whose only tools read files and fetch URLs. The review, and any file the reviewer reads, go to the provider your CLI is configured for (OpenAI or Google by default). [PRIVACY.md](PRIVACY.md) covers what is sent, to whom, and what is kept.
 
+To find the CLIs, and to clean up after a Gemini review (which runs from a temporary directory holding its agent definition), it runs:
+
+- On Linux and macOS: `codex --version`, `agy models`, and `rm -rf` on that directory.
+- On Windows: `where.exe codex`, then `--version` on the `codex.exe` it finds (on `PATH` or inside npm's `@openai/codex` package), `agy models`, and PowerShell's `Remove-Item` on that directory.
+
 ## License
 
 MIT
