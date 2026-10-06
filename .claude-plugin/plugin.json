@@ -9,5 +9,7 @@
   "homepage": "https://github.com/koenvdheide/third-party-reviewers",
   "repository": "https://github.com/koenvdheide/third-party-reviewers",
   "license": "MIT",
+  "keywords": ["code-review", "second-opinion", "red-team", "brainstorm", "codex", "openai", "gemini", "antigravity", "agy"],
+  "privacyPolicyUrl": "https://github.com/koenvdheide/third-party-reviewers/blob/main/PRIVACY.md",
   "types": "./types/index.d.ts"
 }
