@@ -7,7 +7,7 @@ const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isSt
 
 export const CODEX_EXE = 'C:/u/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
 
-export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; dropPrompts?: boolean; holdPrompts?: boolean } = {}) {
+export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; holdPrompts?: boolean } = {}) {
   const clock = mock.clock(on)
   mock.env(on, { OS: 'Windows_NT', TEMP: 'C:/tmp/tpr' })
   const files = new Map<string, string>([[CODEX_EXE, '']])
@@ -38,7 +38,8 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   // The engine hands fs hooks the platform's own path form.
   const key = (path: string) => path.replaceAll('\\', '/')
   // The engine rejects a network location, as the real one does.
-  on('fs.exists', ($, e) => (key(e.path).startsWith('//') ? { deny: `network location: ${e.path}` } : { value: files.has(key(e.path)) }))
+  const inDir = (dir: string) => [...files.keys()].filter(f => f.startsWith(`${dir}/`))
+  on('fs.exists', ($, e) => (key(e.path).startsWith('//') ? { deny: `network location: ${e.path}` } : { value: files.has(key(e.path)) || inDir(key(e.path)).length > 0 }))
   on('fs.read', ($, e) => (files.has(key(e.path)) ? { value: files.get(key(e.path)) as string } : { deny: `ENOENT: ${e.path}` }))
   on('prompt.fill', ($, e) => {
     w.filled.push({ text: e.text, mode: e.mode })
@@ -89,7 +90,10 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
     }
     if (cmd === 'agy models') return gemini ? ok('gemini-3.8-flash-high\tGemini 3.8 Flash (High)') : { deny: 'ENOENT: agy' }
     if (e.argv[0] === 'powershell.exe') {
-      w.removed.push(e.init?.env?.TPR_DIR ?? '')
+      const dir = e.init?.env?.TPR_DIR ?? ''
+      w.removed.push(dir)
+      if (opts.failRemove) return { value: { exitCode: 1, stdout: '', stderr: 'in use', isStdoutTruncated: false, isStderrTruncated: false } }
+      inDir(dir).forEach(f => files.delete(f))
       return ok('')
     }
     return { deny: `not installed: ${cmd}` }

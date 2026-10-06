@@ -107,6 +107,7 @@ async function removeDir($: Engine, dir: string): Promise<void> {
     ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 'Remove-Item -LiteralPath $env:TPR_DIR -Recurse -Force']
     : ['rm', '-rf', '--', dir]
   await $.process.run(argv, { env: { TPR_DIR: dir } }).catch(() => undefined)
+  if (await $.fs.exists(dir).catch(() => false)) $.ui.toast(`Could not delete ${dir}; remove it yourself.`)
 }
 
 async function runDirOf($: Engine, id: string): Promise<string> {

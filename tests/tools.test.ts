@@ -113,7 +113,17 @@ describe('runs', () => {
     expect(w.spawns[0]?.argv).toContain('gemini-3.8-flash-high')
     expect(w.spawns[0]?.cwd).toBe(`C:/tmp/tpr/third-party-reviewers/${id}`)
     expect(w.removed).toContain(`C:/tmp/tpr/third-party-reviewers/${id}`)
+    expect(w.files.has(`C:/tmp/tpr/third-party-reviewers/${id}/.run`)).toBe(false)
+    expect(w.toasts.some(t => t.startsWith('Could not delete'))).toBe(false)
     expect(r.deniedSteps).toEqual(['view_file C:/work/a.ts'])
+  })
+
+  test('a run directory that cannot be deleted is named in a toast', async ($, on) => {
+    const w = world(on, { failRemove: true })
+    w.scripts.push({ lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
+    await boot($, w)
+    const id = await startOf($, { ...start, reviewer: 'gemini' })
+    expect(w.toasts).toContain(`Could not delete C:/tmp/tpr/third-party-reviewers/${id}; remove it yourself.`)
   })
 
   test('a setup failure fails the run instead of stranding it', async ($, on) => {
@@ -123,6 +133,14 @@ describe('runs', () => {
     expect(r.deny).toContain('review failed')
     expect((await resultOf($, String(r.deny).split(':')[0] ?? '')).status).toBe('failed')
     expect(w.spawns.length).toBe(0)
+  })
+
+  test('a run directory that was never created raises no deletion toast', async ($, on) => {
+    const w = world(on, { failWrite: true, failRemove: true })
+    await boot($, w)
+    await call($, 'review_start', { ...start, reviewer: 'gemini' })
+    expect(w.removed.length).toBe(1)
+    expect(w.toasts.some(t => t.startsWith('Could not delete'))).toBe(false)
   })
 
   test('a running row left by a reload is marked cancelled', async ($, on) => {
