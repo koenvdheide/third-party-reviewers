@@ -25,9 +25,7 @@ Codex and Gemini reviews inside [Claude Code](https://claude.ai/code), with live
 
 ## What it runs and sends
 
-- Your local `codex`, read-only and with live web search, and `agy`, from an empty temporary directory it deletes afterwards.
-- The prompt, and any file the reviewer reads, go to OpenAI or Google under your own account. Antigravity also keeps its plan files under `~/.gemini/antigravity-cli/brain/`.
-- The plugin keeps nothing past the session. See the [OpenAI](https://openai.com/policies/privacy-policy/) and [Google](https://policies.google.com/privacy) privacy policies.
+Your local `codex`, read-only and with live web search, or `agy`, from a temporary directory as an agent whose only tools read files and fetch URLs. The review, and any file the reviewer reads, go to the provider your CLI is configured for (OpenAI or Google by default). [PRIVACY.md](PRIVACY.md) covers what is sent, to whom, and what is kept.
 
 ## License
 
