@@ -17,9 +17,9 @@ description: >-
 
 Reviews run through this plugin's review tools: `review_start` with `reviewer: "gemini"` runs one and returns its result, and `review_record` records what you did with each finding. The tools run the Antigravity CLI (`agy`) from a temporary directory as an agent with read-only tools, frame the material as data, check that the answer is complete, and report any step the CLI refused. If `review_start` is not available, the mod did not load: tell the user that reviews need this plugin enabled in Claude Code v2.1.287 or later with mods on (claude.ai and Cowork load no mods).
 
-Keep the files under review unchanged until `review_start` returns; Gemini reads them from disk.
+Keep the files under review unchanged until `review_start` returns: Gemini gets them as they were when the review started, and the citation check reads them from disk when it ends.
 
-Gemini reads files you name by path through the user's own Antigravity permissions (`~/.gemini/antigravity-cli/settings.json`). When a run reports refused steps, tell the user which reads or fetches were refused; that list holds only the steps agy reported as refused, so a run without one can still have missed a file. Never edit those settings, and never suggest granting `write_file`, `command` or `unsandboxed` to get a run through; the settings are the user's.
+The tool puts the contents of the files you name into Gemini's prompt, so they need no Antigravity permissions. Anything else Gemini reads or fetches goes through the user's own permissions (`~/.gemini/antigravity-cli/settings.json`). When a run reports refused steps, tell the user which reads or fetches were refused; that list holds only the steps agy reported as refused, so a run without one can still have missed a file. Never edit those settings, and never suggest granting `write_file`, `command` or `unsandboxed` to get a run through; the settings are the user's.
 
 ## When to Use
 
@@ -58,7 +58,7 @@ Call `review_start` with:
 
 - `reviewer: "gemini"`, `mode` from the list below, and a `question` stating what Gemini should decide or critique. Write the mode as `brainstorm`, `red-team`, `diff-review`, `explain`, `attack-surface` or `exhausted-hypotheses`, or `prose` for a read of a draft; the tool sets its default effort from it.
 - `instructions`: the mode's text below, plus any constraints, framed as constraints rather than your current belief.
-- `artifact`: `text` for inline material, `files` for absolute paths Gemini reads itself. Prefer `files` when the material is on disk. Look at the payload before sending: nothing secret, credential or personal goes into a review.
+- `artifact`: `text` for inline material, `files` for absolute paths of UTF-8 text files, whose contents the tool puts into the prompt with line numbers. Prefer `files` when the material is on disk. Look at the payload before sending: nothing secret, credential or personal goes into a review.
 - `effort` only to override the default the tool sets from the mode.
 
 The tool adds the data-only framing, the simplicity bar and the ownership checklist itself.

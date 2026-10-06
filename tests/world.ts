@@ -15,7 +15,7 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   const w = {
     clock, files,
     scripts: [] as Script[],
-    spawns: [] as { argv: readonly string[]; cwd?: string }[],
+    spawns: [] as { argv: readonly string[]; cwd?: string; input?: string }[],
     removed: [] as string[],
     submitted: [] as string[],
     filled: [] as { text: string; mode?: string }[],
@@ -99,7 +99,7 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
     return { deny: `not installed: ${cmd}` }
   })
   on('process.spawn', async function* ($, e, next) {
-    w.spawns.push({ argv: e.argv, cwd: e.cwd })
+    w.spawns.push({ argv: e.argv, cwd: e.cwd, input: e.input })
     const s = w.scripts.shift() ?? {}
     // A silent child writes nothing until it is killed, which aborts this dispatch.
     if (s.silent) await new Promise<void>(resolve => next.signal.addEventListener('abort', () => resolve()))

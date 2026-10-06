@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { Lines, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash, validateReview } from '../hooks/cli'
+import { Lines, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash, snapshot, validateReview } from '../hooks/cli'
 
 const finding = { severity: 'breakage', title: 'wrong operator', claim: 'a - b', file: 'probe.py', line: 2, symbol: 'add' }
 const review = { verdict: 'one bug', response: 'add subtracts', findings: [finding] }
@@ -29,6 +29,9 @@ describe('prompt', () => {
     expect(p).toContain('- C:/a.ts')
     expect(p).toContain('Architectural ownership:')
     expect(p).toContain('Simplicity bar:')
+  })
+  test('snapshot numbers lines as citations count them', () => {
+    expect(snapshot('C:/a.ts', 'one\r\ntwo')).toBe('File C:/a.ts:\n1| one\n2| two')
   })
   test('explain drops the checklist; no text, no fences', () => {
     const p = buildPrompt({ mode: 'explain', question: 'Q?', instructions: 'Explain.', text: null, files: ['C:/a.ts'], nonce: 'n2' })

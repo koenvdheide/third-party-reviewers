@@ -79,6 +79,11 @@ export function buildPrompt(p: PromptParts): string {
   return out.join('\n')
 }
 
+// Numbered the way citationOf counts lines, so Gemini can cite file:line without reading the file.
+export function snapshot(path: string, text: string): string {
+  return [`File ${path}:`, ...text.split(/\r?\n/).map((line, i) => `${i + 1}| ${line}`)].join('\n')
+}
+
 export function codexArgv(exe: Exe, o: { model: string; effort: string; isRepo: boolean; schema: string }): string[] {
   return [
     ...exe.argv, 'exec', '--json', '--output-schema', o.schema, '-s', 'read-only',

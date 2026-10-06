@@ -98,6 +98,28 @@ describe('runs', () => {
     expect(w.spawns.length).toBe(0)
   })
 
+  test('gemini gets target contents numbered in its prompt, and no path to read', async ($, on) => {
+    const w = world(on)
+    w.files.set('C:/work/a.ts', 'one\ntwo')
+    w.scripts.push({ lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
+    await boot($, w)
+    await startOf($, { ...start, reviewer: 'gemini', artifact: { text: 'note', files: ['C:/work/a.ts'] } })
+    const content = JSON.parse(w.spawns[0]?.input ?? '{}').message.content as string
+    expect(content).toMatch(/<<<ARTIFACT BEGIN:\w+>>>\nnote\n\nFile C:\/work\/a.ts:\n1\| one\n2\| two\n<<<ARTIFACT END:\w+>>>/)
+    expect(content).not.toContain('to read at these absolute paths')
+  })
+
+  test('a gemini target that cannot be read as UTF-8 text is refused', async ($, on) => {
+    const w = world(on)
+    w.files.set('C:/work/w.txt', 'caf\uFFFD')
+    w.files.set('C:/work/u16.txt', 'a\0b\0')
+    await boot($, w)
+    expect((await call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: ['C:/work/nope.ts'] } })).deny).toContain('Cannot read C:/work/nope.ts')
+    expect((await call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: ['C:/work/w.txt'] } })).deny).toContain('NUL or U+FFFD')
+    expect((await call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: ['C:/work/u16.txt'] } })).deny).toContain('NUL or U+FFFD')
+    expect(w.spawns.length).toBe(0)
+  })
+
   test('gemini run uses agy in a run directory that is removed; refused steps are named', async ($, on) => {
     const w = world(on)
     w.scripts.push({ lines: [

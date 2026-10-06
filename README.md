@@ -13,7 +13,7 @@ Codex and Gemini reviews inside [Claude Code](https://claude.ai/code), with live
 ## Prerequisites
 
 - Claude Code v2.1.287 or later, with mods on.
-- At least one signed-in reviewer: the [Codex CLI](https://github.com/openai/codex) (`codex`) or the Antigravity CLI (`agy`). For Gemini to read files, allow `read_file(*)` in `~/.gemini/antigravity-cli/settings.json`.
+- At least one signed-in reviewer: the [Codex CLI](https://github.com/openai/codex) (`codex`) or the Antigravity CLI (`agy`).
 
 ## Installation
 

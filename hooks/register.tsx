@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Finding, FindingStatus, Reviewer, Run } from '../types'
-import { AGY_AGENT_FILE, AGY_AGENT_TEXT, CODEX_MODEL, EFFORTS, Lines, NAME, SAFE_ID, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash } from './cli'
+import { AGY_AGENT_FILE, AGY_AGENT_TEXT, CODEX_MODEL, EFFORTS, Lines, NAME, SAFE_ID, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash, snapshot } from './cli'
 import type { Exe, Outcome, Parser, RawFinding } from './cli'
 import { STATUSES, applyOverrule, applyRecord, citationOf, findingOf, outcome, overrulePrompt } from './findings'
 import type { RecordResult } from './findings'
@@ -171,7 +171,8 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
     const isRepo = (await $.session.repo()) !== null
     const schema = `${$.plugin.root}/schemas/review.schema.json`
     const prompt = buildPrompt({
-      mode: req.mode, question: req.question, instructions: req.instructions, text: req.text, files: req.files,
+      mode: req.mode, question: req.question, instructions: req.instructions, text: req.text,
+      files: req.reviewer === 'gemini' ? [] : req.files,
       nonce: Math.random().toString(36).slice(2, 10),
     })
     let argv: string[]
@@ -327,7 +328,7 @@ async function registerTools($: Engine, i: Installed): Promise<void> {
           type: 'object',
           properties: {
             text: { type: 'string', description: 'inline material, fenced as data' },
-            files: { type: 'array', items: { type: 'string' }, description: 'absolute paths the reviewer reads' },
+            files: { type: 'array', items: { type: 'string' }, description: 'absolute paths; Codex reads them, Gemini gets their contents in its prompt' },
           },
         },
         effort: { type: 'string', description: 'defaults by mode; codex up to xhigh, gemini up to high; never max' },
@@ -391,14 +392,23 @@ export const register: Register = on => {
     if (input.model !== undefined && !SAFE_ID.test(input.model)) return { deny: `The model id ${JSON.stringify(input.model)} has characters a model id never has.` }
     const model = input.reviewer === 'codex' ? (input.model ?? CODEX_MODEL) : `${input.model ?? i.gemini?.flash}-${effort}`
     const files = input.artifact?.files ?? []
-    // Gemini runs from a directory of its own, so a relative path would point elsewhere.
+    const texts = input.artifact?.text === undefined ? [] : [input.artifact.text]
     for (const file of files) {
       if (!ABSOLUTE.test(file)) return { deny: `${file} is not an absolute path; artifact.files takes absolute paths.` }
-      if (!(await $.fs.exists(file))) return { deny: `Cannot find ${file}.` }
+      if (input.reviewer === 'codex') {
+        if (!(await $.fs.exists(file))) return { deny: `Cannot find ${file}.` }
+        continue
+      }
+      // Gemini gets the contents in its prompt, so reviewing them needs none of the user's
+      // Antigravity permissions.
+      const content = await $.fs.read(file).catch((err: unknown) => new Error(err instanceof Error ? err.message : String(err)))
+      if (content instanceof Error) return { deny: `Cannot read ${file}: ${content.message}` }
+      if (/[\0\uFFFD]/.test(content)) return { deny: `${file} contains NUL or U+FFFD characters, as a file that is not UTF-8 text reads, so it cannot go into Gemini's prompt.` }
+      texts.push(snapshot(file, content))
     }
     const run = await startRun($, {
       reviewer: input.reviewer, mode: input.mode, question: input.question, instructions: input.instructions,
-      text: input.artifact?.text ?? null, files, effort, model, exe,
+      text: texts.length > 0 ? texts.join('\n\n') : null, files, effort, model, exe,
     }, gen, next.signal)
     if (run.id === '' || gen !== generation) return { deny: ENDED }
     if (run.status === 'failed') return { deny: `${run.id}: ${run.failure}` }
