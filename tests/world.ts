@@ -1,7 +1,7 @@
 import { mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-export type Script = { lines?: unknown[]; exit?: number; silent?: boolean }
+export type Script = { lines?: unknown[]; stderr?: string[]; exit?: number; silent?: boolean }
 
 const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
 
@@ -104,6 +104,7 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
     // A silent child writes nothing until it is killed, which aborts this dispatch.
     if (s.silent) await new Promise<void>(resolve => next.signal.addEventListener('abort', () => resolve()))
     for (const l of s.lines ?? []) yield { stream: 'stdout' as const, text: JSON.stringify(l) + '\n' }
+    for (const l of s.stderr ?? []) yield { stream: 'stderr' as const, text: l + '\n' }
     return { value: { code: s.exit ?? 0, signal: null } }
   })
   on('prompt.submit', async ($, e) => {

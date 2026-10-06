@@ -104,6 +104,27 @@ describe('streams', () => {
     expect(bad.finish(1).failure).toContain('ERROR')
     expect(agyParser().finish(0).failure).toContain('result event')
   })
+  test('agy stderr: its end kept apart from refusals, and the reason on failure', () => {
+    const ok = agyParser()
+    ok.stderr?.('progress: working\nnotice: view_')
+    ok.stderr?.('file C:/x.ts denied\n')
+    ok.line({ event: 'result', result: { status: 'SUCCESS', structured_output: review } })
+    expect(ok.finish(0)).toMatchObject({ deniedSteps: [], stderr: 'progress: working\nnotice: view_file C:/x.ts denied' })
+    const quiet = agyParser()
+    quiet.line({ event: 'result', result: { status: 'SUCCESS', structured_output: review } })
+    expect(quiet.finish(0).stderr).toBe(undefined)
+    const bad = agyParser()
+    bad.stderr?.('error: failed to construct executor: failed to resolve components: unknown component: tool "x" not found in registry\n')
+    expect(bad.finish(3).failure).toBe('agy ended without a result event; agy printed: error: failed to construct executor: failed to resolve components: unknown component: tool "x" not found in registry')
+    const loud = agyParser()
+    for (let i = 0; i < 30; i++) loud.stderr?.(`progress ${i} ${'x'.repeat(200)}\n`)
+    loud.stderr?.('notice: denied at the end')
+    loud.line({ event: 'result', result: { status: 'SUCCESS', structured_output: review } })
+    const kept = loud.finish(0).stderr ?? ''
+    expect(kept.startsWith('...')).toBe(true)
+    expect(kept.endsWith('notice: denied at the end')).toBe(true)
+    expect(kept.length).toBeLessThanOrEqual(2003)
+  })
 })
 
 describe('validateReview', () => {

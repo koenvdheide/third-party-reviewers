@@ -19,7 +19,7 @@ Reviews run through this plugin's review tools: `review_start` with `reviewer: "
 
 Keep the files under review unchanged until `review_start` returns: Gemini gets them as they were when the review started, and the citation check reads them from disk when it ends.
 
-The tool puts the contents of the files you name into Gemini's prompt, so they need no Antigravity permissions. Anything else Gemini reads or fetches goes through the user's own permissions (`~/.gemini/antigravity-cli/settings.json`). When a run reports refused steps, tell the user which reads or fetches were refused; that list holds only the steps agy reported as refused, so a run without one can still have missed a file. Never edit those settings, and never suggest granting `write_file`, `command` or `unsandboxed` to get a run through; the settings are the user's.
+The tool puts the contents of the files you name into Gemini's prompt, so they need no Antigravity permissions. Anything else Gemini reads or fetches goes through the user's own permissions (`~/.gemini/antigravity-cli/settings.json`). When a run reports refused steps, tell the user which reads or fetches were refused; that list holds only the steps agy reported as refused, so a run without one can still have missed a file. agy's documentation puts permission notices on stderr: a successful run keeps the end of that output in `stderr`, and a failed run adds it to `failure`. Tell the user about any notice of a denied permission there, and treat a line as a refusal only when it says so. Never edit those settings, and never suggest granting `write_file`, `command` or `unsandboxed` to get a run through; the settings are the user's.
 
 ## When to Use
 

@@ -250,6 +250,7 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
   try {
     for await (const chunk of stream) {
       if (chunk.stream === 'stdout') lines.push(chunk.text).forEach(note)
+      else parser.stderr?.(chunk.text)
     }
     lines.flush().forEach(note)
   } catch {
@@ -272,7 +273,7 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
       : list.map(r =>
           r.id !== run.id
             ? r
-            : { ...r, status, endedAt, response: outcome.review?.response ?? null, verdict: outcome.review?.verdict ?? null, findings, deniedSteps: outcome.deniedSteps, failure: outcome.failure },
+            : { ...r, status, endedAt, response: outcome.review?.response ?? null, verdict: outcome.review?.verdict ?? null, findings, deniedSteps: outcome.deniedSteps, stderr: outcome.stderr, failure: outcome.failure },
         ),
   )
 }

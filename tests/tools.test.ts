@@ -140,6 +140,19 @@ describe('runs', () => {
     expect(r.deniedSteps).toEqual(['view_file C:/work/a.ts'])
   })
 
+  test('agy stderr reaches the result: kept on success, the reason on failure', async ($, on) => {
+    const w = world(on)
+    w.scripts.push({ stderr: ['notice: view_file C:/x.ts denied'], lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
+    w.scripts.push({ stderr: ['error: bad agent'], exit: 3 })
+    await boot($, w)
+    const ok = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
+    expect(ok.stderr).toBe('notice: view_file C:/x.ts denied')
+    expect(ok.deniedSteps).toEqual([])
+    const bad = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
+    expect(bad.status).toBe('failed')
+    expect(bad.failure).toContain('agy printed: error: bad agent')
+  })
+
   test('a run directory that cannot be deleted is named in a toast', async ($, on) => {
     const w = world(on, { failRemove: true })
     w.scripts.push({ lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })

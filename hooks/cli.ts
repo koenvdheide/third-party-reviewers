@@ -3,8 +3,8 @@ import type { Reviewer } from '../types'
 export type Exe = { argv: readonly string[]; env?: Record<string, string> }
 export type RawFinding = { severity: string; title: string; claim: string; file: string | null; line: number | null; symbol: string | null }
 export type Review = { verdict: string; response: string; findings: RawFinding[] }
-export type Outcome = { review: Review | null; failure: string | null; deniedSteps: string[] }
-export type Parser = { line: (event: unknown) => string | null; finish: (exitCode: number | null) => Outcome }
+export type Outcome = { review: Review | null; failure: string | null; deniedSteps: string[]; stderr?: string }
+export type Parser = { line: (event: unknown) => string | null; stderr?: (text: string) => void; finish: (exitCode: number | null) => Outcome }
 
 export const NAME: Record<Reviewer, string> = { codex: 'Codex', gemini: 'Gemini' }
 export const CODEX_MODEL = 'gpt-6.1-sol'
@@ -196,10 +196,23 @@ function describeStep(s: Json): string {
   return `${s.tool_name}${target ? ` ${String(target).slice(0, 80)}` : ''}`
 }
 
+const STDERR_KEPT = 2000
+
 export function agyParser(): Parser {
   let result: Json | null = null
   const denied: string[] = []
+  // agy's docs put permission notices on stderr, and a failed start explains itself there, in no
+  // documented format, so the run keeps the end of that output.
+  let err = ''
+  let cut = false
   return {
+    stderr(text) {
+      err += text
+      if (err.length > STDERR_KEPT) {
+        err = err.slice(-STDERR_KEPT)
+        cut = true
+      }
+    },
     line(event) {
       const e = event as Json
       if (e?.event === 'step_update') {
@@ -215,12 +228,13 @@ export function agyParser(): Parser {
       return null
     },
     finish(exitCode) {
-      const fail = (why: string): Outcome => ({ review: null, failure: why, deniedSteps: denied })
+      const printed = err.trim() === '' ? undefined : `${cut ? '...' : ''}${err.trim()}`
+      const fail = (why: string): Outcome => ({ review: null, failure: printed ? `${why}; agy printed: ${printed}` : why, deniedSteps: denied })
       if (result === null) return fail('agy ended without a result event')
       if (result.status !== 'SUCCESS') return fail(`agy reported ${result.status}${result.error ? `: ${result.error}` : ''}`)
       if (exitCode !== 0) return fail(`agy exited ${exitCode}`)
       const v = validateReview(result.structured_output)
-      return 'error' in v ? fail(`agy output did not match the schema: ${v.error}`) : { review: v.review, failure: null, deniedSteps: denied }
+      return 'error' in v ? fail(`agy output did not match the schema: ${v.error}`) : { review: v.review, failure: null, deniedSteps: denied, stderr: printed }
     },
   }
 }

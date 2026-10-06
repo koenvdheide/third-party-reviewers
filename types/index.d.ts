@@ -33,6 +33,7 @@ export type Run = {
   verdict: string | null
   findings: Finding[]
   deniedSteps: string[]
+  stderr?: string
   failure: string | null
 }
 
