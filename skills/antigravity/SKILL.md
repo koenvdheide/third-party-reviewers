@@ -15,7 +15,7 @@ description: >-
 
 # Antigravity as a Thinking Partner
 
-Reviews run through this plugin's review tools: `review_start` with `reviewer: "gemini"` runs one and returns its result, and `review_record` records what you did with each finding. The tools run the Antigravity CLI (`agy`) from an empty directory, frame the material as data, check that the answer is complete, and report any step the CLI refused. If `review_start` is not available, the mod did not load: tell the user that reviews need this plugin enabled in Claude Code v2.1.287 or later with mods on (claude.ai and Cowork load no mods).
+Reviews run through this plugin's review tools: `review_start` with `reviewer: "gemini"` runs one and returns its result, and `review_record` records what you did with each finding. The tools run the Antigravity CLI (`agy`) from a temporary directory as an agent with read-only tools, frame the material as data, check that the answer is complete, and report any step the CLI refused. If `review_start` is not available, the mod did not load: tell the user that reviews need this plugin enabled in Claude Code v2.1.287 or later with mods on (claude.ai and Cowork load no mods).
 
 Keep the files under review unchanged until `review_start` returns; Gemini reads them from disk.
 

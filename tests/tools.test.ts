@@ -113,7 +113,7 @@ describe('runs', () => {
     expect(w.spawns[0]?.argv).toContain('gemini-3.8-flash-high')
     expect(w.spawns[0]?.cwd).toBe(`C:/tmp/tpr/third-party-reviewers/${id}`)
     expect(w.removed).toContain(`C:/tmp/tpr/third-party-reviewers/${id}`)
-    expect(w.files.has(`C:/tmp/tpr/third-party-reviewers/${id}/.run`)).toBe(false)
+    expect(w.files.has(`C:/tmp/tpr/third-party-reviewers/${id}/.agents/agents/tpr-reviewer.md`)).toBe(false)
     expect(w.toasts.some(t => t.startsWith('Could not delete'))).toBe(false)
     expect(r.deniedSteps).toEqual(['view_file C:/work/a.ts'])
   })
@@ -124,6 +124,8 @@ describe('runs', () => {
     await boot($, w)
     const id = await startOf($, { ...start, reviewer: 'gemini' })
     expect(w.toasts).toContain(`Could not delete C:/tmp/tpr/third-party-reviewers/${id}; remove it yourself.`)
+    expect(w.spawns[0]?.argv).toContain('tpr-reviewer')
+    expect(w.files.get(`C:/tmp/tpr/third-party-reviewers/${id}/.agents/agents/tpr-reviewer.md`)).toContain('tools: [view_file, grep_search, read_url_content, finish]')
   })
 
   test('a setup failure fails the run instead of stranding it', async ($, on) => {

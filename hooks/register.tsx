@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Finding, FindingStatus, Reviewer, Run } from '../types'
-import { CODEX_MODEL, EFFORTS, Lines, NAME, SAFE_ID, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash } from './cli'
+import { AGY_AGENT_FILE, AGY_AGENT_TEXT, CODEX_MODEL, EFFORTS, Lines, NAME, SAFE_ID, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash } from './cli'
 import type { Exe, Outcome, Parser, RawFinding } from './cli'
 import { STATUSES, applyOverrule, applyRecord, citationOf, findingOf, outcome, overrulePrompt } from './findings'
 import type { RecordResult } from './findings'
@@ -178,9 +178,8 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
     let input: string
     let parser: Parser
     if (req.reviewer === 'gemini') {
-      // agy can write inside its working directory, so it gets an empty one of its own.
       runDir = await runDirOf($, id)
-      await $.fs.write(`${runDir}/.run`, id)
+      await $.fs.write(`${runDir}/${AGY_AGENT_FILE}`, AGY_AGENT_TEXT)
       argv = agyArgv(req.exe, { model: req.model, schema })
       input = agyInput(prompt)
       parser = agyParser()

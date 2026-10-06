@@ -89,8 +89,21 @@ export function codexArgv(exe: Exe, o: { model: string; effort: string; isRepo: 
   ]
 }
 
+// agy 1.3.0 writes files anywhere, even in plan mode and against the user's permissions, so the
+// reviewer runs as an agent that has no tool able to write. agy loads it from its working directory.
+// `finish` is the tool that returns the --json-schema answer; without it there is no structured_output.
+export const AGY_AGENT = 'tpr-reviewer'
+export const AGY_AGENT_FILE = `.agents/agents/${AGY_AGENT}.md`
+export const AGY_AGENT_TEXT = `---
+name: ${AGY_AGENT}
+description: Reviews the material it is given and never modifies files.
+tools: [view_file, grep_search, read_url_content, finish]
+---
+You review the material you are given and answer. You never modify files.
+`
+
 export function agyArgv(exe: Exe, o: { model: string; schema: string }): string[] {
-  return [...exe.argv, '--print=', '--input-format', 'stream-json', '--output-format', 'stream-json', '--json-schema', o.schema, '--mode', 'plan', '--model', o.model]
+  return [...exe.argv, '--print=', '--input-format', 'stream-json', '--output-format', 'stream-json', '--json-schema', o.schema, '--agent', AGY_AGENT, '--model', o.model]
 }
 
 export function agyInput(prompt: string): string {

@@ -46,7 +46,7 @@ describe('argv', () => {
   })
   test('agy and its stdin line', () => {
     expect(agyArgv({ argv: ['agy'] }, { model: 'gemini-3.8-flash-high', schema: 'C:/p/s.json' })).toEqual([
-      'agy', '--print=', '--input-format', 'stream-json', '--output-format', 'stream-json', '--json-schema', 'C:/p/s.json', '--mode', 'plan', '--model', 'gemini-3.8-flash-high',
+      'agy', '--print=', '--input-format', 'stream-json', '--output-format', 'stream-json', '--json-schema', 'C:/p/s.json', '--agent', 'tpr-reviewer', '--model', 'gemini-3.8-flash-high',
     ])
     expect(agyInput('hi')).toBe('{"event":"user","message":{"role":"user","content":"hi"}}\n')
   })
