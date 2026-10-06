@@ -16,8 +16,7 @@ describe('pane', () => {
       w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
       w.scripts.push({ lines: codexReview })
       await boot($, w)
-      const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).runId
-      await w.clock.settle()
+      const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).id
       const band = await $.ui.mount({ plugin: 'third-party-reviewers', surface, component: 'AbovePrompt', props: { hasSurvey: false } } as any)
       expect(JSON.stringify(await band.drawn())).toContain('findings (1 open)')
       await band.press({ key: 'findings' })
@@ -51,8 +50,7 @@ describe('pane', () => {
     w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
     w.scripts.push({ lines: codexReview })
     await boot($, w)
-    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).runId
-    await w.clock.settle()
+    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).id
     const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'Pane', requestId: PANE, props: props('terminal') } as any)
     await view.press({ key: `pick|${runId}.1` })
     await view.unmount()
@@ -67,11 +65,7 @@ describe('pane', () => {
     w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
     w.scripts.push({ lines: codexReview })
     await boot($, w)
-    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).runId
-    await w.clock.settle()
-    // The review's own notification is held too; let it through first.
-    w.held.shift()?.({})
-    await w.clock.settle()
+    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).id
     // The world answers state itself, so each step mounts afresh to see the new buttons.
     const press = async (key: string) => {
       const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'Pane', requestId: PANE, props: props('terminal') } as any)
@@ -100,10 +94,7 @@ describe('pane', () => {
     w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
     w.scripts.push({ lines: codexReview })
     await boot($, w)
-    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).runId
-    await w.clock.settle()
-    w.held.shift()?.({})
-    await w.clock.settle()
+    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).id
     const press = async (key: string) => {
       const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'Pane', requestId: PANE, props: props('terminal') } as any)
       const pressed = view.press({ key })

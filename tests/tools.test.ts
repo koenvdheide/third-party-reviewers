@@ -9,18 +9,17 @@ const codexReview = (findings: unknown[]) => [
   { type: 'turn.completed' },
 ]
 const start = { reviewer: 'codex', mode: 'red-team', question: 'Q?', instructions: 'Find weaknesses.', artifact: { text: 'body' } }
-const startOf = async ($: any, args: Record<string, unknown> = start) => JSON.parse((await call($, 'review_start', args)).result).runId as string
+const startOf = async ($: any, args: Record<string, unknown> = start) => JSON.parse((await call($, 'review_start', args)).result).id as string
 const resultOf = async ($: any, runId: string) => JSON.parse((await call($, 'review_results', { runId })).result)
 
 describe('runs', () => {
-  test('clean codex run: native binary, complete, one delivery', async ($, on) => {
+  test('clean codex run: native binary, returned complete, nothing submitted', async ($, on) => {
     const w = world(on)
     w.files.set('C:/work/a.ts', 'x')
     w.scripts.push({ lines: codexReview([finding({ file: 'a.ts', line: 2, symbol: 'add' }), finding({ severity: 'other' }), finding({ file: '//server/share/a.ts', line: 1, symbol: null })]) })
     await boot($, w)
-    const id = await startOf($, { ...start, artifact: { files: ['C:/work/a.ts'] } })
-    await w.clock.settle()
-    const r = await resultOf($, id)
+    const r = JSON.parse((await call($, 'review_start', { ...start, artifact: { files: ['C:/work/a.ts'] } })).result)
+    const id = r.id
     expect(id).toMatch(/^r-[0-9a-f]{8}$/)
     expect(r.status).toBe('complete')
     expect(r.findings.map((f: any) => f.id)).toEqual([`${id}.1`, `${id}.2`, `${id}.3`])
@@ -28,44 +27,43 @@ describe('runs', () => {
     expect(typeof r.durationMs).toBe('number')
     expect(w.spawns[0]?.argv[0]).toBe(CODEX_EXE)
     expect(w.spawns[0]?.cwd).toBe('C:/work')
-    expect(w.submitted).toEqual([`[third-party-reviewers] Review ${id} (Codex red-team) finished: 3 findings, 2 breakage. Read it with review_results ${id} before acting on it.`])
+    expect(w.submitted).toEqual([])
   })
 
-  test('non-zero exit fails and still delivers', async ($, on) => {
+  test('non-zero exit returns a failed run', async ($, on) => {
     const w = world(on)
     w.scripts.push({ exit: 1 })
     await boot($, w)
-    const id = await startOf($)
-    await w.clock.settle()
-    const r = await resultOf($, id)
+    const r = JSON.parse((await call($, 'review_start', start)).result)
     expect(r.status).toBe('failed')
     expect(r.failure).toContain('exited 1')
-    expect(w.submitted.length).toBe(1)
+    expect(w.submitted.length).toBe(0)
   })
 
-  test('cancel ends a silent run without delivery', async ($, on) => {
+  test('cancel ends a silent run and returns it cancelled', async ($, on) => {
     const w = world(on)
     w.scripts.push({ silent: true })
     await boot($, w)
-    const id = await startOf($)
+    const pending = call($, 'review_start', start)
     await w.clock.settle()
+    const id = w.runs()[0]?.id ?? ''
     const running = await resultOf($, id)
     expect(running.status).toBe('running')
     expect(typeof running.elapsedMs).toBe('number')
     expect((await call($, 'review_cancel', { runId: id })).result).toContain('Cancelled')
-    await w.clock.settle()
-    expect((await resultOf($, id)).status).toBe('cancelled')
+    expect(JSON.parse((await pending).result).status).toBe('cancelled')
     expect(w.submitted.length).toBe(0)
   })
 
-  test('session end cancels, clears, suppresses delivery', async ($, on) => {
+  test('session end cancels and clears; the start is refused', async ($, on) => {
     const w = world(on)
     w.scripts.push({ silent: true })
     await boot($, w)
-    const id = await startOf($)
+    const pending = call($, 'review_start', start)
     await w.clock.settle()
+    const id = w.runs()[0]?.id ?? ''
     await endSession($)
-    await w.clock.settle()
+    expect((await pending).deny).toContain('conversation changed')
     expect((await call($, 'review_results', { runId: id })).deny).toContain('no run')
     expect(w.submitted.length).toBe(0)
   })
@@ -108,21 +106,21 @@ describe('runs', () => {
       { event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } },
     ] })
     await boot($, w)
-    const id = await startOf($, { ...start, reviewer: 'gemini' })
-    await w.clock.settle()
-    expect((await resultOf($, id)).status).toBe('complete')
+    const r = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
+    const id = r.id
+    expect(r.status).toBe('complete')
     expect(w.spawns[0]?.argv).toContain('--print=')
     expect(w.spawns[0]?.argv).toContain('gemini-3.8-flash-high')
     expect(w.spawns[0]?.cwd).toBe(`C:/tmp/tpr/third-party-reviewers/${id}`)
     expect(w.removed).toContain(`C:/tmp/tpr/third-party-reviewers/${id}`)
-    expect(w.submitted[0]).toContain('Steps the reviewer reported as refused: view_file C:/work/a.ts.')
+    expect(r.deniedSteps).toEqual(['view_file C:/work/a.ts'])
   })
 
   test('a setup failure fails the run instead of stranding it', async ($, on) => {
     const w = world(on, { failWrite: true })
     await boot($, w)
     const r = await call($, 'review_start', { ...start, reviewer: 'gemini' })
-    expect(r.deny).toContain('could not start')
+    expect(r.deny).toContain('review failed')
     expect((await resultOf($, String(r.deny).split(':')[0] ?? '')).status).toBe('failed')
     expect(w.spawns.length).toBe(0)
   })
@@ -135,29 +133,20 @@ describe('runs', () => {
     expect(w.removed).toEqual(['C:/tmp/tpr/third-party-reviewers/r1'])
   })
 
-  test('0.2.0 findings get ids and statuses at load', async ($, on) => {
-    const w = world(on)
-    w.seed([{ id: 'r2', reviewer: 'codex', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: 1, status: 'complete', response: 'r', verdict: 'v', findings: [{ severity: 'breakage', title: 't', claim: 'c', file: null, line: null, symbol: null }], deniedSteps: [], failure: null }])
-    await boot($, w)
-    expect((await resultOf($, 'r2')).findings[0]).toMatchObject({ id: 'r2.1', citation: 'not-checked', status: 'unresolved', overrule: null })
-  })
-
   test('a codex.exe on PATH runs directly', async ($, on) => {
     const w = world(on, { nativeCodex: 'C:\\bin\\codex.exe' })
     w.scripts.push({ lines: codexReview([]) })
     await boot($, w)
     await startOf($)
-    await w.clock.settle()
     expect(w.spawns[0]?.argv[0]).toBe('C:/bin/codex.exe')
   })
 
   test('simultaneous starts get distinct ids', async ($, on) => {
     const w = world(on)
-    w.scripts.push({ silent: true }, { silent: true })
+    w.scripts.push({ lines: codexReview([]) }, { lines: codexReview([]) })
     await boot($, w)
     const [a, b] = await Promise.all([startOf($), startOf($)])
     expect(a).not.toBe(b)
-    await endSession($)
   })
 
   test('a relative finding path is stored resolved against the review directory', async ($, on) => {
@@ -165,9 +154,7 @@ describe('runs', () => {
     w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
     w.scripts.push({ lines: codexReview([finding({ file: 'a.ts', line: 2, symbol: 'add' }), finding({ file: '//server/share/a.ts', line: 1 }), finding({ file: '\\\\server\\share\\a.ts', line: 1 }), finding({})]) })
     await boot($, w)
-    const id = await startOf($)
-    await w.clock.settle()
-    const r = await resultOf($, id)
+    const r = JSON.parse((await call($, 'review_start', start)).result)
     expect(r.findings.map((f: any) => f.file)).toEqual(['C:/work/a.ts', '//server/share/a.ts', '\\\\server\\share\\a.ts', null])
     expect(r.findings[0].citation).toBe('ok')
   })
@@ -179,7 +166,6 @@ describe('records', () => {
     w.scripts.push({ lines: codexReview([finding({}), finding({ title: 'second' })]) })
     await boot($, w)
     const id = await startOf($)
-    await w.clock.settle()
     await Promise.all([
       call($, 'review_record', { findingId: `${id}.1`, status: 'applied', evidence: 'fixed' }),
       call($, 'review_record', { findingId: `${id}.2`, status: 'rejected', evidence: 'contradicted' }),

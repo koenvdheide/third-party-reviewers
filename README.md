@@ -1,16 +1,14 @@
 # third-party-reviewers
 
-Codex and Gemini reviews inside [Claude Code](https://claude.ai/code). Claude starts a review with one tool call and keeps working while it runs. The status line shows its progress, a cancel stops the CLI, and the findings come back structured.
+Codex and Gemini reviews inside [Claude Code](https://claude.ai/code), with live status, a cancel that stops the CLI, and structured findings.
 
 ## What it does
 
-- `review_start`, `review_results` and `review_cancel`: the tools Claude uses to run a review in the background, read the result and stop a run.
+- `review_start` runs a review and returns its result; `review_results` reads a run again; `review_cancel` stops one.
 - `review_record`: Claude records what it did with each finding, with its evidence: applied, rejected or unresolved. Each finding also gets a quick textual check of the file, line and symbol it cites.
 - The findings pane, from `findings` above the prompt: every review in the conversation, each finding with Claude's judgement. Apply or Reject overrules it, and Ask starts a question about a finding.
 - The `/codex` and `/antigravity` skills tell Claude when to review, which mode to use and how to treat the findings.
 - `review` above the prompt starts a review, one round or to convergence.
-
-A review that finishes during a busy turn waits for that turn to end; if you `/clear` first, its notification still arrives in the new conversation.
 
 ## Prerequisites
 
@@ -24,8 +22,6 @@ A review that finishes during a busy turn waits for that turn to end; if you `/c
 /plugin install third-party-reviewers@agent-tools
 /reload-plugins
 ```
-
-It replaces the `codex` and `antigravity` plugins, so uninstall those. An `orchestrated-build-flow` older than 1.2.0 still depends on `codex`, so update that first.
 
 ## What it runs and sends
 

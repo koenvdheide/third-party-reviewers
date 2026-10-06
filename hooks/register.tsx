@@ -18,7 +18,7 @@ type Installed = { codex: Exe | null; gemini: { exe: Exe; flash: string } | null
 const T = <N extends string>(name: N) => `mcp__third-party-reviewers__${name}` as const
 const BUTTON = 'external-review'
 const FINDINGS = 'findings'
-const ENDED = 'The conversation changed before the review could start.'
+const ENDED = 'The conversation changed, so the review was dropped.'
 const ABSOLUTE = /^(?:[A-Za-z]:[\\/]|[\\/])/
 
 const runs = atom({ plugin: 'third-party-reviewers', key: 'runs' } as const, [])
@@ -146,7 +146,7 @@ type StartRequest = {
   exe: Exe
 }
 
-async function startRun($: Engine, req: StartRequest, gen: number): Promise<Run> {
+async function startRun($: Engine, req: StartRequest, gen: number, signal: AbortSignal): Promise<Run> {
   const startedAt = await $.clock.now()
   const draft: Run = {
     id: '', reviewer: req.reviewer, mode: req.mode, model: req.model, effort: req.effort, targets: req.files,
@@ -155,8 +155,8 @@ async function startRun($: Engine, req: StartRequest, gen: number): Promise<Run>
   let id = ''
   await update($, runs, list => {
     if (gen !== generation) return list
-    // Random, so an id never repeats across /clear or a resumed conversation; short for
-    // notifications, and redrawn until no run in the ledger has it.
+    // Random, so an id is unlikely to come back after /clear or a resume; redrawn until
+    // no run in the ledger has it.
     do id = `r-${crypto.randomUUID().slice(0, 8)}`
     while (list.some(r => r.id === id))
     return [...list, { ...draft, id }]
@@ -201,13 +201,15 @@ async function startRun($: Engine, req: StartRequest, gen: number): Promise<Run>
     tick($)
     const target = req.files.length > 0 ? req.files.map(f => f.split(/[\\/]/).pop()).join(', ') : 'inline text'
     $.ui.toast(`${label} started on ${target}`)
+    // The call waits for the review: stream waits cost no hook budget, and an interrupt
+    // aborts the call, which kills the child.
     // Citations resolve against the reviewer's own working directory.
-    void consume($, run, stream, parser, runDir, runDir ?? root, gen)
+    await consume($, run, stream, parser, runDir, runDir ?? root, gen, signal)
     return run
   } catch (err) {
     if (runDir !== null) await removeDir($, runDir)
     const endedAt = await $.clock.now()
-    const failure = `The review could not start: ${err instanceof Error ? err.message : String(err)}`
+    const failure = `The review failed: ${err instanceof Error ? err.message : String(err)}`
     await update($, runs, list => list.map(r => (r.id === id ? { ...r, status: 'failed' as const, endedAt, failure } : r)))
     return { ...run, status: 'failed', endedAt, failure }
   }
@@ -231,7 +233,7 @@ async function toFindings($: Engine, runId: string, raw: RawFinding[], root: str
   )
 }
 
-async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runDir: string | null, citeRoot: string, gen: number): Promise<void> {
+async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runDir: string | null, citeRoot: string, gen: number, signal: AbortSignal): Promise<void> {
   const lines = new Lines()
   const note = (line: string) => {
     let event: unknown
@@ -250,12 +252,12 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
     }
     lines.flush().forEach(note)
   } catch {
-    // closed by a cancel or a session end; `cancelled` and `generation` say which
+    // closed by a cancel, an interrupt or a session end; `cancelled`, `signal` and `generation` say which
   }
   const exit = await stream.result.catch(() => null)
   progress.delete(run.id)
   stoppers.delete(run.id)
-  const wasCancelled = cancelled.delete(run.id)
+  const wasCancelled = cancelled.delete(run.id) || signal.aborted
   const outcome: Outcome = wasCancelled ? { review: null, failure: null, deniedSteps: [] } : parser.finish(exit?.code ?? null)
   const findings = outcome.review && gen === generation ? await toFindings($, run.id, outcome.review.findings, citeRoot) : []
   if (runDir !== null) await removeDir($, runDir)
@@ -272,16 +274,6 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
             : { ...r, status, endedAt, response: outcome.review?.response ?? null, verdict: outcome.review?.verdict ?? null, findings, deniedSteps: outcome.deniedSteps, failure: outcome.failure },
         ),
   )
-  if (wasCancelled || gen !== generation) return
-
-  const breakage = findings.filter(f => f.severity === 'breakage').length
-  const parts = [
-    `[third-party-reviewers] Review ${run.id} (${NAME[run.reviewer]} ${run.mode}) `,
-    status === 'complete' ? `finished: ${findings.length} findings, ${breakage} breakage.` : `failed: ${outcome.failure}.`,
-  ]
-  if (outcome.deniedSteps.length > 0) parts.push(` Steps the reviewer reported as refused: ${outcome.deniedSteps.join('; ')}.`)
-  parts.push(` Read it with review_results ${run.id} before acting on it.`)
-  await $.prompt.submit({ text: parts.join('') })
 }
 
 async function cancelRun(id: string): Promise<boolean> {
@@ -293,21 +285,13 @@ async function cancelRun(id: string): Promise<boolean> {
 }
 
 // After a reload the children are gone with the old module, but `$.state` keeps their rows,
-// and a Gemini run's directory stays on disk. Rows from 0.2.0 have findings without ids or
-// statuses; they get them here, unchecked.
+// and a Gemini run's directory stays on disk.
 async function markOrphans($: Engine): Promise<void> {
   const orphans = (await read($, runs)).filter(r => r.status === 'running' && !stoppers.has(r.id))
   for (const r of orphans) if (r.reviewer === 'gemini') await removeDir($, await runDirOf($, r.id))
   const endedAt = await $.clock.now()
   await update($, runs, list =>
-    list.map(r => ({
-      ...r,
-      ...(orphans.some(o => o.id === r.id) ? { status: 'cancelled' as const, endedAt, failure: 'The plugin reloaded while this review ran, which ended it.' } : {}),
-      findings: r.findings.map((f, i): Finding => {
-        const found = 'id' in f ? f : { ...(f as RawFinding), id: `${r.id}.${i + 1}`, citation: 'not-checked' as const, status: 'unresolved' as const, evidence: null }
-        return 'overrule' in found ? (found as Finding) : { ...found, overrule: null }
-      }),
-    })),
+    list.map(r => (orphans.some(o => o.id === r.id) ? { ...r, status: 'cancelled' as const, endedAt, failure: 'The plugin reloaded while this review ran, which ended it.' } : r)),
   )
 }
 
@@ -330,7 +314,7 @@ async function registerTools($: Engine, i: Installed): Promise<void> {
   const names = reviewers.map(r => NAME[r]).join(' or ')
   await $.tool.register({
     name: 'review_start',
-    description: `Start an independent review by ${names}. Returns a run id at once; the result arrives later as a notification. Follow the codex or antigravity skill for when to review, which mode, the instructions to pass, and how to handle findings.`,
+    description: `Run an independent review by ${names} and wait for its result. Follow the codex or antigravity skill for when to review, which mode, the instructions to pass, and how to handle findings.`,
     inputSchema: {
       type: 'object',
       required: ['reviewer', 'mode', 'question', 'instructions', 'artifact'],
@@ -395,7 +379,7 @@ export const register: Register = on => {
     return { text: `The ${cli} is not installed on this machine, so this skill cannot run a review. Tell the user${other ? `, and offer a review by ${NAME[other]} instead` : ''}.` }
   })
 
-  on('tool.call', { tool: T('review_start') }, async ($, e) => {
+  on('tool.call', { tool: T('review_start') }, async ($, e, next) => {
     const gen = generation
     const input = e as unknown as { reviewer: Reviewer; mode: string; question: string; instructions: string; artifact?: { text?: string; files?: string[] }; effort?: string; model?: string }
     const i = await ensure($)
@@ -415,10 +399,11 @@ export const register: Register = on => {
     const run = await startRun($, {
       reviewer: input.reviewer, mode: input.mode, question: input.question, instructions: input.instructions,
       text: input.artifact?.text ?? null, files, effort, model, exe,
-    }, gen)
+    }, gen, next.signal)
     if (run.id === '' || gen !== generation) return { deny: ENDED }
     if (run.status === 'failed') return { deny: `${run.id}: ${run.failure}` }
-    return { result: JSON.stringify({ runId: run.id, reviewer: run.reviewer, mode: run.mode, model: run.model, effort: run.effort, note: 'The result arrives as a notification when the review ends; you may work on something unrelated meanwhile.' }) }
+    const done = (await read($, runs)).find(r => r.id === run.id) ?? run
+    return { result: JSON.stringify({ ...done, durationMs: (done.endedAt ?? (await $.clock.now())) - done.startedAt }, null, 2) }
   })
 
   on('tool.call', { tool: T('review_results') }, async ($, e) => {

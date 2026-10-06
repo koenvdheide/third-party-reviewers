@@ -29,6 +29,8 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
     seed(runs: unknown[]) {
       state.set('third-party-reviewers/runs', { value: runs, version: 1 })
     },
+    // The ledger, for a run whose review_start has not returned yet.
+    runs: () => (state.get('third-party-reviewers/runs')?.value ?? []) as { id: string }[],
   }
   const codex = opts.codex ?? true
   const gemini = opts.gemini ?? true
