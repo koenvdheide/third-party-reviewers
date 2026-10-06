@@ -204,7 +204,7 @@ export function agyParser(): Parser {
       const e = event as Json
       if (e?.event === 'step_update') {
         const s = (e.step_update ?? {}) as Json
-        if (s.step_type === 'tool' && s.state === 'ERROR') {
+        if (s.step_type === 'tool' && (s.state === 'ERROR' || (s.state === 'DONE' && s.tool_info?.error))) {
           denied.push(describeStep(s))
           return `refused ${s.tool_name}`
         }
