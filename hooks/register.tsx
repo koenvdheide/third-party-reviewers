@@ -247,20 +247,28 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
     const p = progress.get(run.id)
     if (activity !== null && p) p.activity = activity
   }
+  let streamFailure: string | null = null
   try {
     for await (const chunk of stream) {
       if (chunk.stream === 'stdout') lines.push(chunk.text).forEach(note)
       else parser.stderr?.(chunk.text)
     }
     lines.flush().forEach(note)
-  } catch {
-    // closed by a cancel, an interrupt or a session end; `cancelled`, `signal` and `generation` say which
+  } catch (err) {
+    streamFailure = String(err).slice(-2000)
   }
-  const exit = await stream.result.catch(() => null)
+  const exit = await stream.result.catch((err: unknown) => {
+    streamFailure ??= String(err).slice(-2000)
+    return null
+  })
   progress.delete(run.id)
   stoppers.delete(run.id)
   const wasCancelled = cancelled.delete(run.id) || signal.aborted
   const outcome: Outcome = wasCancelled ? { review: null, failure: null, deniedSteps: [] } : parser.finish(exit?.code ?? null)
+  if (!wasCancelled && streamFailure !== null) {
+    outcome.review = null
+    outcome.failure = [streamFailure, outcome.failure].filter(Boolean).join('; ')
+  }
   const findings = outcome.review && gen === generation ? await toFindings($, run.id, outcome.review.findings, citeRoot) : []
   if (runDir !== null) await removeDir($, runDir)
 
