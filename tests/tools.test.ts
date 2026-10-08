@@ -260,7 +260,7 @@ describe('refusals', () => {
     await boot($, w)
     expect((await call($, 'review_start', { ...start, reviewer: 'gemini', effort: 'xhigh' })).deny).toContain('xhigh')
     expect((await call($, 'review_start', { ...start, reviewer: 'gemini', model: 'gemini & calc' })).deny).toContain('model')
-    expect((await call($, 'review_start', start)).deny).toContain('not installed')
+    expect((await call($, 'review_start', start)).deny).toContain('unavailable')
     expect(w.spawns.length).toBe(0)
   })
   test('codex max refused', async ($, on) => {
@@ -272,13 +272,25 @@ describe('refusals', () => {
 })
 
 describe('skill note', () => {
-  test('missing CLI replaces the skill text and names the other reviewer', async ($, on) => {
+  test('missing CLI preserves the skill text and names the other reviewer', async ($, on) => {
     const w = world(on, { codex: false })
     await boot($, w)
     const r = await $.skill.prompt({ skill: 'third-party-reviewers:codex', text: 'original' })
-    expect(r.text).toContain('not installed')
+    expect(r.text).toContain('unavailable')
     expect(r.text).toContain('Gemini')
+    expect(r.text).toContain('original')
   })
+  test('a failed model catalogue preserves recovery instructions and the diagnostic', async ($, on) => {
+    const w = world(on, { catalogueError: 'catalogue unavailable' })
+    await boot($, w)
+    const r = await $.skill.prompt({ skill: 'third-party-reviewers:antigravity', text: 'original recovery instructions' })
+    expect(r.text).toContain('catalogue unavailable')
+    expect(r.text).toContain('original recovery instructions')
+    expect(r.text).not.toContain('not installed')
+    expect((await call($, 'review_start', { ...start, reviewer: 'gemini' })).deny).toContain('catalogue unavailable')
+    expect(w.spawns.length).toBe(0)
+  })
+
   test('an installed CLI leaves the skill text alone', async ($, on) => {
     const w = world(on)
     await boot($, w)

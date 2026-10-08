@@ -7,7 +7,7 @@ const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isSt
 
 export const CODEX_EXE = 'C:/u/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
 
-export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; holdPrompts?: boolean } = {}) {
+export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; holdPrompts?: boolean } = {}) {
   const clock = mock.clock(on)
   mock.env(on, { OS: 'Windows_NT', TEMP: 'C:/tmp/tpr' })
   const files = new Map<string, string>([[CODEX_EXE, '']])
@@ -88,6 +88,7 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
       if (opts.slowResolve) await clock.sleep(100)
       return ok('codex-cli 0.159.3')
     }
+    if (cmd === 'agy models' && opts.catalogueError) return { value: { exitCode: 1, stdout: '', stderr: opts.catalogueError, isStdoutTruncated: false, isStderrTruncated: false } }
     if (cmd === 'agy models') return gemini ? ok('gemini-3.8-flash-high\tGemini 3.8 Flash (High)') : { deny: 'ENOENT: agy' }
     if (e.argv[0] === 'powershell.exe') {
       const dir = e.init?.env?.TPR_DIR ?? ''

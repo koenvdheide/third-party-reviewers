@@ -21,7 +21,7 @@ Use `review_start` with `reviewer: "codex"` and the mode, question, instructions
 
 The tool runs the Codex CLI in its read-only sandbox, from the current session directory, with live web search and an ephemeral session. `artifact.files` are absolute paths Codex reads from disk; `artifact.text` is inline material. Prefer files when surrounding code matters, and keep the reviewed files unchanged until the call returns.
 
-If `review_start` is unavailable, report that the plugin mod did not load: reviews require this plugin enabled in Claude Code v2.1.287 or later with mods on; claude.ai and Cowork load no mods.
+If this skill includes a discovery failure, report its diagnostic and use the recovery guidance below; availability is checked again when a new session starts. If `review_start` is unavailable without that diagnostic, check CLI discovery and mod loading: reviews require this plugin enabled in Claude Code v2.1.287 or later with mods on; claude.ai and Cowork load no mods.
 
 ## Model and effort
 

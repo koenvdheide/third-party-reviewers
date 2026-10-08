@@ -13,7 +13,7 @@ import { PANE, paneTree } from './pane'
 
 type Engine = EngineInterface
 type Stream = ReturnType<Engine['process']['spawn']>
-type Installed = { codex: Exe | null; gemini: { exe: Exe; flash: string } | null }
+type Installed = { codex: Exe | null; gemini: { exe: Exe; flash: string } | null; errors: Record<Reviewer, string> }
 
 const T = <N extends string>(name: N) => `mcp__third-party-reviewers__${name}` as const
 const BUTTON = 'external-review'
@@ -37,13 +37,10 @@ let ticker: { cancel: () => void } | null = null
 const accepted = new Map<string, number>()
 let acceptances = 0
 
-async function works($: Engine, exe: Exe, args: string[]): Promise<string | null> {
-  try {
-    const r = await $.process.run([...exe.argv, ...args], { timeoutMs: 30_000, env: exe.env })
-    return r.exitCode === 0 ? r.stdout : null
-  } catch {
-    return null
-  }
+async function probe($: Engine, exe: Exe, args: string[]): Promise<string> {
+  const r = await $.process.run([...exe.argv, ...args], { timeoutMs: 30_000, env: exe.env })
+  if (r.exitCode !== 0) throw new Error(`${[...exe.argv, ...args].join(' ')} exited ${r.exitCode}: ${(r.stderr || r.stdout).slice(-2000)}`)
+  return r.stdout
 }
 
 // npm installs Codex on Windows as script shims only, so a bare `codex` goes through
@@ -52,10 +49,10 @@ async function works($: Engine, exe: Exe, args: string[]): Promise<string | null
 // (the platform package nested or beside @openai/codex, then its vendor folder), with the
 // two variables the launcher sets.
 async function windowsCodex($: Engine): Promise<Exe | null> {
-  const found = await works($, { argv: ['where.exe'] }, ['codex'])
-  const paths = (found ?? '').split(/\r?\n/).map(p => p.trim().replaceAll('\\', '/')).filter(p => p !== '')
+  const found = await probe($, { argv: ['where.exe'] }, ['codex'])
+  const paths = found.split(/\r?\n/).map(p => p.trim().replaceAll('\\', '/')).filter(p => p !== '')
   const native = paths.find(p => p.toLowerCase().endsWith('.exe'))
-  if (native !== undefined) return (await works($, { argv: [native] }, ['--version'])) ? { argv: [native] } : null
+  if (native !== undefined) return (await probe($, { argv: [native] }, ['--version'])) ? { argv: [native] } : null
   const shim = paths.find(p => p.toLowerCase().endsWith('.cmd'))
   if (shim === undefined) return null
   const prefix = shim.slice(0, shim.lastIndexOf('/'))
@@ -66,7 +63,7 @@ async function windowsCodex($: Engine): Promise<Exe | null> {
   for (const candidate of [`${root}/node_modules/@openai/${pkg}/${bin}`, `${prefix}/node_modules/@openai/${pkg}/${bin}`, `${root}/${bin}`]) {
     if (!(await $.fs.exists(candidate))) continue
     const exe: Exe = { argv: [candidate], env: { CODEX_MANAGED_BY_NPM: '1', CODEX_MANAGED_PACKAGE_ROOT: root } }
-    return (await works($, exe, ['--version'])) ? exe : null
+    return (await probe($, exe, ['--version'])) ? exe : null
   }
   return null
 }
@@ -74,20 +71,27 @@ async function windowsCodex($: Engine): Promise<Exe | null> {
 async function resolveCodex($: Engine): Promise<Exe | null> {
   if ((await $.env.get('OS')) === 'Windows_NT') return windowsCodex($)
   const bare: Exe = { argv: ['codex'] }
-  return (await works($, bare, ['--version'])) ? bare : null
+  return (await probe($, bare, ['--version'])) ? bare : null
 }
 
 async function resolveGemini($: Engine): Promise<Installed['gemini']> {
   const exe: Exe = { argv: ['agy'] }
-  const listing = await works($, exe, ['models'])
-  const flash = listing === null ? null : newestFlash(listing)
+  const listing = await probe($, exe, ['models'])
+  const flash = newestFlash(listing)
   return flash === null ? null : { exe, flash }
 }
 
 async function ensure($: Engine): Promise<Installed> {
   if (installed === null) {
-    const [codex, gemini] = await Promise.all([resolveCodex($), resolveGemini($)])
-    installed = { codex, gemini }
+    const [codex, gemini] = await Promise.allSettled([resolveCodex($), resolveGemini($)])
+    installed = {
+      codex: codex.status === 'fulfilled' ? codex.value : null,
+      gemini: gemini.status === 'fulfilled' ? gemini.value : null,
+      errors: {
+        codex: codex.status === 'rejected' ? String(codex.reason).slice(-2000) : 'No runnable Codex executable was found.',
+        gemini: gemini.status === 'rejected' ? String(gemini.reason).slice(-2000) : 'agy models returned no supported Gemini Flash model.',
+      },
+    }
   }
   return installed
 }
@@ -386,7 +390,7 @@ export const register: Register = on => {
     if (available(i).includes(reviewer)) return next(e)
     const other = available(i).find(r => r !== reviewer)
     const cli = reviewer === 'codex' ? 'Codex CLI (`codex`)' : 'Antigravity CLI (`agy`)'
-    return { text: `The ${cli} is not installed on this machine, so this skill cannot run a review. Tell the user${other ? `, and offer a review by ${NAME[other]} instead` : ''}.` }
+    return { text: `The ${cli} is unavailable: ${i.errors[reviewer]}\nTell the user${other ? `, and offer a review by ${NAME[other]} instead` : ''}. After correcting discovery, start a new session to check availability again.\n\n${e.text}` }
   })
 
   on('tool.call', { tool: T('review_start') }, async ($, e, next) => {
@@ -395,7 +399,7 @@ export const register: Register = on => {
     const i = await ensure($)
     if (gen !== generation) return { deny: ENDED }
     const exe = input.reviewer === 'codex' ? i.codex : input.reviewer === 'gemini' ? i.gemini?.exe : null
-    if (!exe) return { deny: `${NAME[input.reviewer] ?? input.reviewer} is not installed here. Installed: ${available(i).map(r => NAME[r]).join(', ') || 'none'}.` }
+    if (!exe) return { deny: `${NAME[input.reviewer] ?? input.reviewer} is unavailable: ${i.errors[input.reviewer] ?? 'Unknown reviewer.'} Available: ${available(i).map(r => NAME[r]).join(', ') || 'none'}.` }
     const effort = input.effort ?? defaultEffort(input.reviewer, input.mode)
     if (!EFFORTS[input.reviewer].includes(effort)) return { deny: `Effort ${effort} is not allowed for ${NAME[input.reviewer]}; use one of ${EFFORTS[input.reviewer].join(', ')}.` }
     if (input.model !== undefined && !SAFE_ID.test(input.model)) return { deny: `The model id ${JSON.stringify(input.model)} has characters a model id never has.` }
@@ -463,10 +467,11 @@ export const register: Register = on => {
    */
   on('ui.press', { element: BUTTON }, async ($, e) => {
     const answered = { element: e.element }
-    const reviewers = available(await ensure($))
+    const i = await ensure($)
+    const reviewers = available(i)
     const [first] = reviewers
     if (first === undefined) {
-      $.ui.toast('Neither the Codex CLI nor the Antigravity CLI is installed.')
+      $.ui.toast(`No reviewer is available. Codex: ${i.errors.codex} Gemini: ${i.errors.gemini}`)
       return answered
     }
     let who: Reviewer = first
