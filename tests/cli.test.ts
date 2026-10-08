@@ -9,10 +9,12 @@ describe('defaults', () => {
   test('effort by reviewer and mode', () => {
     expect(defaultEffort('codex', 'test-gaps')).toBe('medium')
     expect(defaultEffort('codex', 'red-team')).toBe('xhigh')
+    expect(defaultEffort('codex', 'breakage-review')).toBe('xhigh')
     expect(defaultEffort('codex', 'diff-review')).toBe('high')
     expect(defaultEffort('gemini', 'explain')).toBe('medium')
     expect(defaultEffort('gemini', 'test-gaps')).toBe('high')
     expect(defaultEffort('gemini', 'red-team')).toBe('high')
+    expect(defaultEffort('gemini', 'breakage-review')).toBe('high')
   })
   test('newest flash from agy models', () => {
     const listing = 'Fetching available models...\ngemini-3.7-flash-high\tG\ngemini-3.8-flash-low\tG\ngemini-3.1-pro-high\tG\nclaude-opus-5-5-high\tC'
@@ -29,6 +31,18 @@ describe('prompt', () => {
     expect(p).toContain('- C:/a.ts')
     expect(p).toContain('Architectural ownership:')
     expect(p).toContain('Simplicity bar:')
+    expect(p).not.toContain('Breakage scope:')
+  })
+  test('breakage scopes shared checks to failures while preserving safeguards', () => {
+    const p = buildPrompt({ mode: 'breakage-review', question: 'Does the change meet its requirements?', instructions: 'Review defects.', text: 'the change', files: ['C:/a.ts'], nonce: 'breakage' })
+    expect(p).toContain('Breakage scope: report only evidenced failures')
+    expect(p).toContain('do not produce standalone cleanup findings')
+    expect(p).toContain('Architectural ownership:')
+    expect(p).toContain('Simplicity bar:')
+    expect(p).toContain('Keep checks at trust and system boundaries.')
+    expect(p).not.toContain('If the artifact is already heavier than its stated scope, say that first.')
+    expect(p).toContain('<<<ARTIFACT BEGIN:breakage>>>')
+    expect(p).toContain('Answer in JSON matching the schema')
   })
   test('snapshot numbers lines as citations count them', () => {
     expect(snapshot('C:/a.ts', 'one\r\ntwo')).toBe('File C:/a.ts:\n1| one\n2| two')

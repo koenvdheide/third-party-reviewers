@@ -9,6 +9,32 @@ const codexReview = [
 ]
 const props = (surface: string) => ({ title: 'Review findings', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: {}, view: {}, surface })
 
+describe('review button', () => {
+  for (const reviewer of ['codex', 'gemini'] as const) {
+    for (const depth of ['To convergence', 'One round']) {
+      test(`${reviewer} ${depth} uses the selected skill's workflow`, async ($, on) => {
+        const w = world(on, { codex: reviewer === 'codex', gemini: reviewer === 'gemini' })
+        on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => ({ result: { questions: e.questions, answers: { 'How far should it go?': depth } } }))
+        await boot($, w)
+        const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false } } as any)
+        await view.press({ key: 'external-review' })
+        expect(w.submitted.length).toBe(1)
+        const prompt = w.submitted[0]!
+        expect(prompt).toContain(`third-party-reviewers:${reviewer === 'codex' ? 'codex' : 'antigravity'}`)
+        if (depth === 'To convergence') {
+          expect(prompt).toContain('shared review guide')
+          expect(prompt).toContain('convergence')
+          expect(prompt).not.toContain('until no actionable findings remain')
+        } else {
+          expect(prompt).toContain('one round')
+          expect(prompt).not.toContain('convergence')
+        }
+        await view.unmount()
+      })
+    }
+  }
+})
+
 describe('pane', () => {
   for (const surface of ['terminal', 'desktop'] as const) {
     test(`shows Claude's judgement, takes the user's overrule, and asks, on ${surface}`, async ($, on) => {

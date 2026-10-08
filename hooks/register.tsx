@@ -316,7 +316,7 @@ async function registerTools($: Engine, i: Installed): Promise<void> {
   const names = reviewers.map(r => NAME[r]).join(' or ')
   await $.tool.register({
     name: 'review_start',
-    description: `Run an independent review by ${names} and wait for its result. Follow the codex or antigravity skill for when to review, which mode, the instructions to pass, and how to handle findings.`,
+    description: `Run an independent review by ${names} and wait for its result. Read the codex or antigravity skill and its required skills/review-guide.md for mode instructions and handling findings; the provider skill supplies execution and recovery rules.`,
     inputSchema: {
       type: 'object',
       required: ['reviewer', 'mode', 'question', 'instructions', 'artifact'],
@@ -324,7 +324,7 @@ async function registerTools($: Engine, i: Installed): Promise<void> {
         reviewer: { type: 'string', enum: reviewers },
         mode: { type: 'string' },
         question: { type: 'string' },
-        instructions: { type: 'string', description: 'the mode instructions from the skill' },
+        instructions: { type: 'string', description: 'the mode instructions from skills/review-guide.md, plus task context' },
         artifact: {
           type: 'object',
           properties: {
@@ -352,7 +352,7 @@ function instruction(reviewer: Reviewer, depth: string): string {
   // which may be a spec, a plan, a file or a decision rather than a diff.
   const target = 'whatever we are working on'
   return depth === 'To convergence'
-    ? `Use ${skill} to review ${target}, carrying prior findings forward each round, until no actionable findings remain; stop and report any blocker needing my input or evidence you cannot reach.`
+    ? `Use ${skill} to review ${target}, following the shared review guide through convergence and its finishing checks; carry prior findings forward and stop to report any blocker needing my input or evidence you cannot reach.`
     : `Use ${skill} to review ${target}, one round.`
 }
 
