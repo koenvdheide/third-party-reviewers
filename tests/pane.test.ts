@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
 
 import { boot, call, world } from './world'
 
@@ -8,6 +9,8 @@ const codexReview = [
   { type: 'turn.completed' },
 ]
 const props = (surface: string) => ({ title: 'Review findings', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: {}, view: {}, surface })
+// Nothing beneath the plugins draws the band in a test, so this stands in for another plugin's row.
+const beneath = (on: On) => on('ui.render', { component: 'AbovePrompt' }, ($, e) => $.ui.resolve(e).Text({ children: 'other' }))
 
 describe('review button', () => {
   for (const reviewer of ['codex', 'gemini'] as const) {
@@ -15,6 +18,7 @@ describe('review button', () => {
       test(`${reviewer} ${depth} uses the selected skill's workflow`, async ($, on) => {
         const w = world(on, { codex: reviewer === 'codex', gemini: reviewer === 'gemini' })
         on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => ({ result: { questions: e.questions, answers: { 'How far should it go?': depth } } }))
+        beneath(on)
         await boot($, w)
         const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false } } as any)
         await view.press({ key: 'external-review' })
@@ -33,12 +37,35 @@ describe('review button', () => {
       })
     }
   }
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`keeps what the plugins beneath drew in the band, on ${surface}`, async ($, on) => {
+      const w = world(on)
+      beneath(on)
+      w.seed([{ id: 'r1', findings: [] }])
+      await boot($, w)
+      const band = await $.ui.mount({ plugin: 'third-party-reviewers', surface, component: 'AbovePrompt', props: { hasSurvey: false } } as any)
+      expect(await band.find({ key: 'external-review' })).toBeDefined()
+      expect(await band.find({ key: 'findings' })).toBeDefined()
+      expect(await band.find({ type: 'Text', text: 'other' })).toBeDefined()
+    })
+
+    test(`yields the band to a survey, on ${surface}`, async ($, on) => {
+      const w = world(on)
+      beneath(on)
+      await boot($, w)
+      const band = await $.ui.mount({ plugin: 'third-party-reviewers', surface, component: 'AbovePrompt', props: { hasSurvey: true } } as any)
+      expect(await band.find({ key: 'external-review' })).toBeUndefined()
+      expect(await band.find({ type: 'Text', text: 'other' })).toBeDefined()
+    })
+  }
 })
 
 describe('pane', () => {
   for (const surface of ['terminal', 'desktop'] as const) {
     test(`shows Claude's judgement, takes the user's overrule, and asks, on ${surface}`, async ($, on) => {
       const w = world(on)
+      beneath(on)
       w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
       w.scripts.push({ lines: codexReview })
       await boot($, w)

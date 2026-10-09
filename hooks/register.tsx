@@ -580,15 +580,20 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // Yield the row while the engine has a survey in it.
     if (e.props.hasSurvey) return next(e)
+    // The band holds one tree, so keep what the plugins beneath drew.
+    const beneath = await next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const all = await read($, runs)
     const open = all.flatMap(r => r.findings).filter(f => outcome(f) === 'unresolved').length
     // Quiet at rest: dim until pointed at, no chrome in a terminal (a desktop draws its own).
     return (
-      <Box>
-        <Button key={BUTTON} plain dimColor hotkey="r" label="review" onPress={() => {}} />
-        {all.length > 0 ? <Text dimColor> · </Text> : null}
-        {all.length > 0 ? <Button key={FINDINGS} plain dimColor hotkey="f" label={open > 0 ? `findings (${open} open)` : 'findings'} onPress={() => {}} /> : null}
+      <Box gap={2}>
+        {beneath}
+        <Box>
+          <Button key={BUTTON} plain dimColor hotkey="r" label="review" onPress={() => {}} />
+          {all.length > 0 ? <Text dimColor> · </Text> : null}
+          {all.length > 0 ? <Button key={FINDINGS} plain dimColor hotkey="f" label={open > 0 ? `findings (${open} open)` : 'findings'} onPress={() => {}} /> : null}
+        </Box>
       </Box>
     )
   })
