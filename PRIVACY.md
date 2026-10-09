@@ -19,7 +19,7 @@ The plugin itself has no server, makes no other network requests and adds no tel
 
 ## What stays on your machine
 
-- Each review's details, response and findings, and what was decided about them, are kept in Claude Code's plugin state and cleared when the session ends.
+- Each review's details, response and findings, and what was decided about them, are kept per conversation in the plugin's store file, under `plugins/store/` in your Claude Code configuration directory, so a resumed conversation has them again. When a session starts, the plugin deletes the least recently saved conversations beyond the first 2 MiB, always keeping the current one.
 - To check the reviewer's citations, the plugin reads the cited files locally. It keeps only the result of the check.
 - An Antigravity review runs in a temporary directory, which the plugin deletes when the review ends, is cancelled or fails to start. If the deletion fails, the plugin shows you the directory's path. A crash can also leave it behind, under `third-party-reviewers/` in your system temp folder.
 - Codex runs with `--ephemeral`, so it doesn't save the session transcript. Both CLIs keep their own history, logs or cache according to their own settings, and the plugin doesn't delete those.

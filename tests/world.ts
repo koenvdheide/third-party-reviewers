@@ -7,13 +7,18 @@ const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isSt
 
 export const CODEX_EXE = 'C:/u/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
 
-export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; holdPrompts?: boolean } = {}) {
+export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean } = {}) {
   const clock = mock.clock(on)
   mock.env(on, { OS: 'Windows_NT', TEMP: 'C:/tmp/tpr' })
   const files = new Map<string, string>([[CODEX_EXE, '']])
   const state = new Map<string, { value: unknown; version: number }>()
+  const store = new Map<string, unknown>()
   const w = {
-    clock, files,
+    clock, files, store,
+    sessionId: 's1',
+    // With holdStore on, each store write waits here until the test releases it.
+    holdStore: false,
+    heldStore: [] as (() => void)[],
     scripts: [] as Script[],
     spawns: [] as { argv: readonly string[]; cwd?: string; input?: string }[],
     removed: [] as string[],
@@ -66,7 +71,19 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
     state.set(k, { value: e.value, version: current + 1 })
     return { value: { isSet: true, version: current + 1 } }
   })
-  on('session.id', () => ({ value: 's1' }))
+  on('store.get', ($, e) => ({ value: store.get(e.key) }))
+  on('store.set', async ($, e) => {
+    if (w.holdStore) await new Promise<void>(resolve => w.heldStore.push(resolve))
+    if (opts.failStore) return { deny: 'EACCES: the store is not writable' }
+    store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
+  on('store.delete', ($, e) => {
+    store.delete(e.key)
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: [...store.keys()] }))
+  on('session.id', () => ({ value: w.sessionId }))
   on('session.cwd', async () => {
     if (opts.slowSetup) await clock.sleep(100)
     return { value: 'C:/work' }
@@ -120,6 +137,7 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('classic.SessionStart', () => ({}))
   on('skill.prompt', ($, e) => ({ text: e.text }))
   return w
 }

@@ -254,6 +254,110 @@ describe('records', () => {
   })
 })
 
+describe('resume', () => {
+  test('a resumed conversation gets its own reviews back, a running one cancelled', async ($, on) => {
+    const w = world(on)
+    w.scripts.push({ lines: codexReview([finding({})]) }, { silent: true }, { lines: codexReview([]) })
+    await boot($, w)
+    const done = await startOf($)
+    await call($, 'review_record', { findingId: `${done}.1`, status: 'applied', evidence: 'fixed' })
+    const pending = call($, 'review_start', start)
+    await w.clock.settle()
+    const running = w.runs()[1]?.id ?? ''
+    await endSession($)
+    await pending
+    w.sessionId = 's2'
+    expect((await call($, 'review_results', { runId: done })).deny).toContain('no run')
+    const other = await startOf($)
+    await $.session.end({ reason: 'resume', sessionId: 's2', resume: { id: 's2' } })
+
+    w.sessionId = 's1'
+    await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
+    expect((await resultOf($, done)).findings[0].status).toBe('applied')
+    const cancelled = await resultOf($, running)
+    expect(cancelled.status).toBe('cancelled')
+    expect(cancelled.failure).toContain('conversation ended')
+    expect((await call($, 'review_results', { runId: other })).deny).toContain('no run')
+    // Compaction keeps the conversation, so the store is not read back.
+    w.store.delete('runs:s1')
+    await $.classic.SessionStart({ source: 'compact', session_id: 's1' })
+    expect((await resultOf($, done)).status).toBe('complete')
+  })
+
+  test('a change waits for the save before it, and one queued before the conversation ended never lands', async ($, on) => {
+    const w = world(on)
+    w.scripts.push({ lines: codexReview([finding({}), finding({})]) })
+    await boot($, w)
+    const id = await startOf($)
+    w.holdStore = true
+    const first = call($, 'review_record', { findingId: `${id}.1`, status: 'applied', evidence: 'e' })
+    await w.clock.settle()
+    const second = call($, 'review_record', { findingId: `${id}.2`, status: 'applied', evidence: 'e' })
+    await w.clock.settle()
+    expect((w.runs()[0] as any).findings[1].status).toBe('unresolved')
+    await endSession($)
+    w.holdStore = false
+    w.heldStore.forEach(release => release())
+    await Promise.all([first, second])
+    expect((w.store.get('runs:s1') as any).runs.map((r: any) => r.findings.map((f: any) => f.status))).toEqual([['applied', 'unresolved']])
+  })
+
+  test('a change whose conversation ends while it is written is not stored under the next one', async ($, on) => {
+    const w = world(on)
+    w.scripts.push({ lines: codexReview([finding({})]) })
+    await boot($, w)
+    const id = await startOf($)
+    w.holdWrites = true
+    const pending = call($, 'review_record', { findingId: `${id}.1`, status: 'applied', evidence: 'e' })
+    await w.clock.settle()
+    w.holdWrites = false
+    await endSession($)
+    w.sessionId = 's2'
+    w.heldWrites.forEach(release => release())
+    await pending
+    expect(w.store.has('runs:s2')).toBe(false)
+    expect((w.store.get('runs:s1') as any).runs[0].findings[0].status).toBe('unresolved')
+  })
+
+  test('a change held across the end of its conversation does not apply when that conversation is resumed', async ($, on) => {
+    const w = world(on)
+    w.scripts.push({ lines: codexReview([finding({})]) })
+    await boot($, w)
+    const id = await startOf($)
+    w.holdWrites = true
+    const pending = call($, 'review_record', { findingId: `${id}.1`, status: 'applied', evidence: 'e' })
+    await w.clock.settle()
+    w.holdWrites = false
+    await endSession($)
+    await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
+    w.heldWrites.forEach(release => release())
+    await pending
+    expect((await resultOf($, id)).findings[0].status).toBe('unresolved')
+    expect((w.store.get('runs:s1') as any).runs[0].findings[0].status).toBe('unresolved')
+  })
+
+  test('session start drops the least recently saved conversations past the budget, never the current one', async ($, on) => {
+    const w = world(on)
+    const MiB = 1024 * 1024
+    // Two UTF-8 bytes a character, so a budget counted in characters would keep them all.
+    const saved = (savedAt: number, size: number) => ({ savedAt, runs: [{ id: 'r', response: 'é'.repeat(size / 2) }] })
+    w.store.set('runs:s1', saved(0, 0.5 * MiB))
+    w.store.set('runs:new', saved(3, 0.5 * MiB))
+    w.store.set('runs:mid', saved(2, 0.5 * MiB))
+    w.store.set('runs:old', saved(1, 0.75 * MiB))
+    await boot($, w)
+    expect([...w.store.keys()].sort()).toEqual(['runs:mid', 'runs:new', 'runs:s1'])
+  })
+
+  test('a failed save is named in a toast and the review still returns', async ($, on) => {
+    const w = world(on, { failStore: true })
+    w.scripts.push({ lines: codexReview([]) })
+    await boot($, w)
+    expect(JSON.parse((await call($, 'review_start', start)).result).status).toBe('complete')
+    expect(w.toasts.some(t => t.includes('Could not save'))).toBe(true)
+  })
+})
+
 describe('refusals', () => {
   test('gemini xhigh, unsafe model, missing reviewer: no child', async ($, on) => {
     const w = world(on, { codex: false })

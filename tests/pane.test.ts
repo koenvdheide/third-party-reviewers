@@ -115,7 +115,7 @@ describe('pane', () => {
     expect(r.findings[0].overrule).toBe('apply')
   })
 
-  test('a late write of an older accepted instruction does not undo a newer one', async ($, on) => {
+  test('a later accepted instruction is written after an earlier one, in state and store', async ($, on) => {
     const w = world(on, { holdPrompts: true })
     w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
     w.scripts.push({ lines: codexReview })
@@ -133,18 +133,18 @@ describe('pane', () => {
     await press(`pick|${runId}.1`)
     const reject = await press(`reject|${runId}.1`)
     const apply = await press(`apply|${runId}.1`)
-    // Both are accepted, Reject first; their writes then land in the opposite order.
+    // Reject is accepted first and its write held; Apply's waits behind it.
     w.holdWrites = true
     w.held[0]?.({})
     for (let i = 0; i < 50 && w.heldWrites.length < 1; i++) await w.clock.advance(0)
     w.held[1]?.({})
-    for (let i = 0; i < 50 && w.heldWrites.length < 2; i++) await w.clock.advance(0)
-    w.holdWrites = false
-    w.heldWrites[1]?.()
     for (let i = 0; i < 20; i++) await w.clock.advance(0)
+    expect(w.heldWrites.length).toBe(1)
+    w.holdWrites = false
     w.heldWrites[0]?.()
     await Promise.all([reject.pressed, apply.pressed])
     const r = JSON.parse((await call($, 'review_results', { runId })).result)
     expect(r.findings[0].overrule).toBe('apply')
+    expect((w.store.get('runs:s1') as any).runs[0].findings[0].overrule).toBe('apply')
   })
 })

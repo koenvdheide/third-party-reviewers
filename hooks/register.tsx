@@ -25,6 +25,14 @@ const runs = atom({ plugin: 'third-party-reviewers', key: 'runs' } as const, [])
 // The finding the pane has open, if any.
 const selected = atom({ plugin: 'third-party-reviewers', key: 'selected' } as const, null)
 
+// Each conversation's ledger is also kept in the store, since `$.state` does not outlive the
+// process; a resumed conversation finds it there.
+type Saved = { savedAt: number; runs: Run[] }
+const savedKey = (sessionId: string) => `runs:${sessionId}`
+// Half the store's 4 MiB, so the conversation in progress has room to grow.
+const STORE_BUDGET = 2 * 1024 * 1024
+let saving: Promise<void> = Promise.resolve()
+
 let installed: Installed | null = null
 const progress = new Map<string, { label: string; startedAt: number; activity: string }>()
 const stoppers = new Map<string, () => Promise<void>>()
@@ -33,9 +41,6 @@ const cancelled = new Set<string>()
 // /clear ended never delivers into the next conversation.
 let generation = 0
 let ticker: { cancel: () => void } | null = null
-// Accepted overrule instructions per finding, numbered in the order Claude accepted them.
-const accepted = new Map<string, number>()
-let acceptances = 0
 
 async function probe($: Engine, exe: Exe, args: string[]): Promise<string> {
   const r = await $.process.run([...exe.argv, ...args], { timeoutMs: 30_000, env: exe.env })
@@ -119,6 +124,44 @@ async function runDirOf($: Engine, id: string): Promise<string> {
   return `${tmp}/third-party-reviewers/${id}`
 }
 
+// Every change to the ledger but the session-end wipe goes through here. Changes queue, each
+// stored with the ledger it wrote, so the store holds them in order; a dispatch's own reads
+// would see only its moment. One made before the conversation changed is dropped, on each
+// of update's retries too, so it never lands in, or under the key of, another conversation.
+async function change($: Engine, fn: (list: Run[]) => Run[]): Promise<void> {
+  const gen = generation
+  const turn = saving.then(async () => {
+    const id = await $.session.id()
+    const list = await update($, runs, current => (gen === generation ? fn(current) : current))
+    if (gen !== generation) return
+    await $.store
+      .set(savedKey(id), { savedAt: await $.clock.now(), runs: list })
+      .catch((err: unknown) => $.ui.toast(`Could not save the reviews for resuming this conversation: ${err instanceof Error ? err.message : String(err)}`))
+  })
+  saving = turn.catch(() => undefined)
+  await turn
+}
+
+async function restore($: Engine, sessionId: string): Promise<void> {
+  const saved = (await $.store.get(savedKey(sessionId))) as Saved | undefined
+  await update($, runs, () => saved?.runs ?? [])
+  await markOrphans($)
+}
+
+// Drops the least recently saved conversations past the budget; the current one stays.
+async function prune($: Engine): Promise<void> {
+  const current = savedKey(await $.session.id())
+  const others = await Promise.all(
+    (await $.store.keys()).filter(k => k.startsWith('runs:') && k !== current).map(async key => ({ key, saved: (await $.store.get(key)) as Saved })),
+  )
+  const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value ?? null)).length
+  let size = bytes(await $.store.get(current))
+  for (const { key, saved } of others.sort((a, b) => b.saved.savedAt - a.saved.savedAt)) {
+    size += bytes(saved)
+    if (size > STORE_BUDGET) await $.store.delete(key)
+  }
+}
+
 function mmss(ms: number): string {
   const s = Math.floor(ms / 1000)
   return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`
@@ -158,7 +201,7 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
     startedAt, endedAt: null, status: 'running', response: null, verdict: null, findings: [], deniedSteps: [], failure: null,
   }
   let id = ''
-  await update($, runs, list => {
+  await change($, list => {
     if (gen !== generation) return list
     // Random, so an id is unlikely to come back after /clear or a resume; redrawn until
     // no run in the ledger has it.
@@ -215,7 +258,7 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
     if (runDir !== null) await removeDir($, runDir)
     const endedAt = await $.clock.now()
     const failure = `The review failed: ${err instanceof Error ? err.message : String(err)}`
-    await update($, runs, list => list.map(r => (r.id === id ? { ...r, status: 'failed' as const, endedAt, failure } : r)))
+    await change($, list => list.map(r => (r.id === id ? { ...r, status: 'failed' as const, endedAt, failure } : r)))
     return { ...run, status: 'failed', endedAt, failure }
   }
 }
@@ -279,7 +322,7 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
   const status = wasCancelled ? 'cancelled' : outcome.review ? 'complete' : 'failed'
   const endedAt = await $.clock.now()
   if (gen !== generation) return
-  await update($, runs, list =>
+  await change($, list =>
     gen !== generation
       ? list
       : list.map(r =>
@@ -298,14 +341,16 @@ async function cancelRun(id: string): Promise<boolean> {
   return true
 }
 
-// After a reload the children are gone with the old module, but `$.state` keeps their rows,
-// and a Gemini run's directory stays on disk.
+// After a reload the children are gone with the old module, but `$.state` keeps their rows; a
+// resumed conversation's stored rows can still read running, since the end of a conversation
+// stops its reviews without recording it. A Gemini run's directory stays on disk.
 async function markOrphans($: Engine): Promise<void> {
   const orphans = (await read($, runs)).filter(r => r.status === 'running' && !stoppers.has(r.id))
+  if (orphans.length === 0) return
   for (const r of orphans) if (r.reviewer === 'gemini') await removeDir($, await runDirOf($, r.id))
   const endedAt = await $.clock.now()
-  await update($, runs, list =>
-    list.map(r => (orphans.some(o => o.id === r.id) ? { ...r, status: 'cancelled' as const, endedAt, failure: 'The plugin reloaded while this review ran, which ended it.' } : r)),
+  await change($, list =>
+    list.map(r => (orphans.some(o => o.id === r.id) ? { ...r, status: 'cancelled' as const, endedAt, failure: 'The plugin reloaded or the conversation ended while this review ran, which ended it.' } : r)),
   )
 }
 
@@ -374,7 +419,15 @@ export const register: Register = on => {
     installed = null
     await markOrphans($)
     await registerTools($, await ensure($))
+    await prune($)
     return started
+  })
+
+  // Raised for `--resume` and `--continue` (ahead of `session.start`) and for an in-process
+  // /resume, which raises no `session.start`.
+  on('classic.SessionStart', async ($, e, next) => {
+    if (e.source === 'resume') await restore($, e.session_id)
+    return next(e)
   })
 
   on('session.end', async ($, e, next) => {
@@ -444,7 +497,7 @@ export const register: Register = on => {
     const input = e as unknown as { findingId: string; status: FindingStatus; evidence: string }
     if (!STATUSES.includes(input.status)) return { deny: `Status must be one of ${STATUSES.join(', ')}.` }
     let recorded = { ok: false, reason: 'not recorded' } as RecordResult
-    await update($, runs, list => {
+    await change($, list => {
       const r = applyRecord(list, input.findingId, input.status, input.evidence)
       recorded = r.result
       return r.next
@@ -513,11 +566,8 @@ export const register: Register = on => {
       // A refused prompt shows its reason to the user itself.
       const sent = await $.prompt.submit({ text: overrulePrompt(id, overrule), asUser: true })
       if (sent.drop !== undefined) return answered
-      const mine = ++acceptances
-      accepted.set(id, mine)
-      // Checked inside the change, which update reruns on a version miss: a write that lands
-      // after a newer accepted one leaves it alone.
-      await update($, runs, list => (accepted.get(id) === mine ? applyOverrule(list, id, overrule) : list))
+      // Changes apply in the order they are made, so the later accepted instruction lands last.
+      await change($, list => applyOverrule(list, id, overrule))
     } else if (kind === 'ask') {
       const title = findingOf(await read($, runs), id)?.title ?? id
       // insert, so a draft already in the box survives
