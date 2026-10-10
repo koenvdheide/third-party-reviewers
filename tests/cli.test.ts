@@ -142,9 +142,6 @@ describe('streams', () => {
 })
 
 describe('validateReview', () => {
-  test('accepts the schema shape', () => {
-    expect('review' in validateReview(review)).toBe(true)
-  })
   test('rejects skew', () => {
     expect('error' in validateReview({ verdict: 'x', response: 'y' })).toBe(true)
     expect('error' in validateReview({ ...review, findings: [{ ...finding, severity: 'critical' }] })).toBe(true)

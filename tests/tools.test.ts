@@ -40,28 +40,21 @@ describe('runs', () => {
     expect(w.submitted.length).toBe(0)
   })
 
-  for (const reviewer of ['codex', 'gemini']) {
-    test(`${reviewer} preserves process-start errors`, async ($, on) => {
+  for (const { name, reviewer, script, failure } of [
+    { name: 'codex preserves process-start errors', reviewer: 'codex', script: { error: 'EACCES: reviewer executable' }, failure: ['EACCES: reviewer executable'] },
+    { name: 'gemini preserves process-start errors', reviewer: 'gemini', script: { error: 'EACCES: reviewer executable' }, failure: ['EACCES: reviewer executable'] },
+    { name: 'a failed Gemini stream keeps both its error and prior stderr', reviewer: 'gemini', script: { stderr: ['notice: view_file C:/x.ts denied'], error: 'EPIPE: reviewer stream' }, failure: ['EPIPE: reviewer stream', 'view_file C:/x.ts denied'] },
+  ]) {
+    test(name, async ($, on) => {
       const w = world(on)
-      w.scripts.push({ error: 'EACCES: reviewer executable' })
+      w.scripts.push(script)
       await boot($, w)
       const r = JSON.parse((await call($, 'review_start', { ...start, reviewer })).result)
       expect(r.status).toBe('failed')
-      expect(r.failure).toContain('EACCES: reviewer executable')
+      for (const text of failure) expect(r.failure).toContain(text)
       expect(r.findings).toEqual([])
     })
   }
-
-  test('a failed Gemini stream keeps both its error and prior stderr', async ($, on) => {
-    const w = world(on)
-    w.scripts.push({ stderr: ['notice: view_file C:/x.ts denied'], error: 'EPIPE: reviewer stream' })
-    await boot($, w)
-    const r = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
-    expect(r.status).toBe('failed')
-    expect(r.failure).toContain('EPIPE: reviewer stream')
-    expect(r.failure).toContain('view_file C:/x.ts denied')
-    expect(r.findings).toEqual([])
-  })
 
   test('cancel ends a silent run and returns it cancelled', async ($, on) => {
     const w = world(on)
