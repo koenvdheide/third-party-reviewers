@@ -417,9 +417,11 @@ function instruction(reviewer: Reviewer, depth: string): string {
   // Deliberately not diff-bound: the target is whatever is salient in the session,
   // which may be a spec, a plan, a file or a decision rather than a diff.
   const target = 'whatever we are working on'
+  // Naming it first lets the user stop a review of the wrong thing.
+  const confirm = 'First name the target and the question in one line; if more than one thing could be meant, ask me which before starting.'
   return depth === 'To convergence'
-    ? `Use ${skill} to review ${target}, following the shared review guide through convergence and its finishing checks; carry prior findings forward and stop to report any blocker needing my input or evidence you cannot reach.`
-    : `Use ${skill} to review ${target}, one round.`
+    ? `Use ${skill} to review ${target}, following the shared review guide through convergence and its finishing checks; carry prior findings forward and stop to report any blocker needing my input or evidence you cannot reach. ${confirm}`
+    : `Use ${skill} to review ${target}, one round. ${confirm}`
 }
 
 export const register: Register = on => {

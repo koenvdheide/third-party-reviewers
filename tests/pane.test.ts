@@ -30,6 +30,7 @@ describe('review button', () => {
         expect(w.origins[0]).toMatchObject({ kind: 'plugin', asUser: true })
         const prompt = w.submitted[0]!
         expect(prompt).toContain(`third-party-reviewers:${reviewer === 'codex' ? 'codex' : 'antigravity'}`)
+        expect(prompt).toContain('First name the target and the question in one line; if more than one thing could be meant, ask me which before starting.')
         if (depth === 'To convergence') {
           expect(prompt).toContain('shared review guide')
           expect(prompt).toContain('convergence')
