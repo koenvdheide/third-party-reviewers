@@ -350,12 +350,14 @@ async function cancelRun(id: string): Promise<boolean> {
 // After a reload the children are gone with the old module, but `$.state` keeps their rows; a
 // resumed conversation's stored rows can still read running, since the end of a conversation
 // stops its reviews without recording it. A Gemini run's directory stays on disk.
+// `$.state` only: during an in-process /resume, `$.session.id()` still names the conversation
+// left behind, so a store write would land under its key. Every restore marks the rows again.
 async function markOrphans($: Engine): Promise<void> {
   const orphans = (await read($, runs)).filter(r => r.status === 'running' && !stoppers.has(r.id))
   if (orphans.length === 0) return
   for (const r of orphans) if (r.reviewer === 'gemini') await removeDir($, await runDirOf($, r.id))
   const endedAt = await $.clock.now()
-  await change($, list =>
+  await update($, runs, list =>
     list.map(r => (orphans.some(o => o.id === r.id) ? { ...r, status: 'cancelled' as const, endedAt, failure: 'The plugin reloaded or the conversation ended while this review ran, which ended it.' } : r)),
   )
 }
@@ -431,7 +433,7 @@ export const register: Register = on => {
   })
 
   // Raised for `--resume` and `--continue` (ahead of `session.start`) and for an in-process
-  // /resume, which raises no `session.start`.
+  // /resume, once the left conversation's `session.end` has returned; no `session.start` follows.
   on('classic.SessionStart', async ($, e, next) => {
     if (e.source === 'resume') await restore($, e.session_id)
     return next(e)

@@ -271,8 +271,10 @@ describe('resume', () => {
     const other = await startOf($)
     await $.session.end({ reason: 'resume', sessionId: 's2', resume: { id: 's2' } })
 
-    w.sessionId = 's1'
+    // As in Claude Code, the session id names the conversation left behind until the hook is done.
     await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
+    w.sessionId = 's1'
+    expect((w.store.get('runs:s2') as any).runs.map((r: any) => r.id)).toEqual([other])
     expect((await resultOf($, done)).findings[0].status).toBe('applied')
     const cancelled = await resultOf($, running)
     expect(cancelled.status).toBe('cancelled')
