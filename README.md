@@ -8,7 +8,7 @@ Codex and Gemini reviews inside [Claude Code](https://claude.ai/code), with live
 - `review_record`: Claude records what it did with each finding, with its evidence: applied, rejected or unresolved. Each finding also gets a quick textual check of the file, line and symbol it cites.
 - The findings pane, from `findings` above the prompt: every review in the conversation, each finding with Claude's judgement. Apply or Reject overrules it, and Ask starts a question about a finding.
 - The `/codex` and `/antigravity` skills offer the same modes and use one [review guide](skills/review-guide.md) for mode prompts, evidence standards and finding handling. Each skill supplies its own model, file-access, permission and recovery instructions.
-- `review` above the prompt starts a review, one round or to convergence. The [convergence workflow](skills/review-guide.md#convergence) resolves breakage, then reviews simplifications and churn, and verifies final correctness.
+- `review` above the prompt opens one row per reviewer CLI it finds, each offering one round or to convergence. Click a choice, or type its number into an empty prompt; `review` again closes the rows. The [convergence workflow](skills/review-guide.md#convergence) resolves breakage, then reviews simplifications and churn, and verifies final correctness.
 
 ## Prerequisites
 
