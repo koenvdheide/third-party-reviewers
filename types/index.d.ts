@@ -39,6 +39,6 @@ export type Run = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'third-party-reviewers': { runs: Run[]; selected: string | null }
+    'third-party-reviewers': { runs: Run[]; selected: string | null; picker: Reviewer[] | null }
   }
 }

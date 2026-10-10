@@ -23,6 +23,7 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
     spawns: [] as { argv: readonly string[]; cwd?: string; input?: string }[],
     removed: [] as string[],
     submitted: [] as string[],
+    origins: [] as unknown[],
     filled: [] as { text: string; mode?: string }[],
     opened: [] as string[],
     toasts: [] as string[],
@@ -133,6 +134,7 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
       if (answer.drop !== undefined) return { drop: answer.drop }
     }
     w.submitted.push(e.text)
+    w.origins.push(e.origin)
     return { text: e.text }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))

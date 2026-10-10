@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { boot, call, world } from './world'
+import { boot, call, endSession, world } from './world'
 
 const PANE = 'third-party-reviewers-findings'
 const codexReview = [
@@ -16,13 +16,18 @@ describe('review button', () => {
   for (const reviewer of ['codex', 'gemini'] as const) {
     for (const depth of ['To convergence', 'One round']) {
       test(`${reviewer} ${depth} uses the selected skill's workflow`, async ($, on) => {
-        const w = world(on, { codex: reviewer === 'codex', gemini: reviewer === 'gemini' })
-        on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => ({ result: { questions: e.questions, answers: { 'How far should it go?': depth } } }))
+        const w = world(on)
         beneath(on)
         await boot($, w)
         const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false } } as any)
         await view.press({ key: 'external-review' })
+        // The world answers state itself, so the engine sees no write to redraw on.
+        await view.redraw()
+        const choice = `external-review|${reviewer}|${depth}`
+        expect((await view.find({ key: choice }))?.props.hotkey).toBe(String((reviewer === 'codex' ? 1 : 3) + (depth === 'One round' ? 0 : 1)))
+        await view.press({ key: choice })
         expect(w.submitted.length).toBe(1)
+        expect(w.origins[0]).toMatchObject({ kind: 'plugin', asUser: true })
         const prompt = w.submitted[0]!
         expect(prompt).toContain(`third-party-reviewers:${reviewer === 'codex' ? 'codex' : 'antigravity'}`)
         if (depth === 'To convergence') {
@@ -37,6 +42,68 @@ describe('review button', () => {
       })
     }
   }
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`offers only the reviewers that are available, on ${surface}`, async ($, on) => {
+      const w = world(on, { codex: false })
+      beneath(on)
+      await boot($, w)
+      const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface, component: 'AbovePrompt', props: { hasSurvey: false } } as any)
+      await view.press({ key: 'external-review' })
+      await view.redraw()
+      expect((await view.find({ key: 'external-review|gemini|One round' }))?.props.hotkey).toBe('1')
+      expect((await view.find({ key: 'external-review|gemini|To convergence' }))?.props.hotkey).toBe('2')
+      expect(await view.find({ key: 'external-review|codex|One round' })).toBeUndefined()
+    })
+  }
+
+  test('a second press of review closes the choices', async ($, on) => {
+    const w = world(on)
+    beneath(on)
+    await boot($, w)
+    const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false } } as any)
+    await view.press({ key: 'external-review' })
+    await view.press({ key: 'external-review' })
+    await view.redraw()
+    expect(await view.find({ key: 'external-review|codex|One round' })).toBeUndefined()
+    expect(w.submitted).toEqual([])
+  })
+
+  test('a choice pressed twice before the redraw submits once', async ($, on) => {
+    const w = world(on)
+    beneath(on)
+    await boot($, w)
+    const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false } } as any)
+    await view.press({ key: 'external-review' })
+    await view.redraw()
+    await Promise.all([view.press({ key: 'external-review|codex|One round' }), view.press({ key: 'external-review|codex|One round' })])
+    expect(w.submitted.length).toBe(1)
+  })
+
+  test('a session end closes the choices', async ($, on) => {
+    const w = world(on)
+    beneath(on)
+    await boot($, w)
+    const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false } } as any)
+    await view.press({ key: 'external-review' })
+    await view.redraw()
+    await endSession($)
+    await view.press({ key: 'external-review|codex|One round' })
+    expect(w.submitted).toEqual([])
+    await view.redraw()
+    expect(await view.find({ key: 'external-review|codex|One round' })).toBeUndefined()
+  })
+
+  test('with no reviewer available, a press shows why and offers nothing', async ($, on) => {
+    const w = world(on, { codex: false, gemini: false })
+    beneath(on)
+    await boot($, w)
+    const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false } } as any)
+    await view.press({ key: 'external-review' })
+    await view.redraw()
+    expect(w.toasts.some(t => t.startsWith('No reviewer is available'))).toBe(true)
+    expect(await view.find({ key: 'external-review|codex|One round' })).toBeUndefined()
+  })
 
   for (const surface of ['terminal', 'desktop'] as const) {
     test(`keeps what the plugins beneath drew in the band, on ${surface}`, async ($, on) => {

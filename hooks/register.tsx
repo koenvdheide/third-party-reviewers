@@ -18,12 +18,16 @@ type Installed = { codex: Exe | null; gemini: { exe: Exe; flash: string } | null
 const T = <N extends string>(name: N) => `mcp__third-party-reviewers__${name}` as const
 const BUTTON = 'external-review'
 const FINDINGS = 'findings'
+const choiceKey = (reviewer: Reviewer, depth: string) => `${BUTTON}|${reviewer}|${depth}`
+const CHOICES = (Object.keys(NAME) as Reviewer[]).flatMap(r => [choiceKey(r, 'One round'), choiceKey(r, 'To convergence')])
 const ENDED = 'The conversation changed, so the review was dropped.'
 const ABSOLUTE = /^(?:[A-Za-z]:[\\/]|[\\/])/
 
 const runs = atom({ plugin: 'third-party-reviewers', key: 'runs' } as const, [])
 // The finding the pane has open, if any.
 const selected = atom({ plugin: 'third-party-reviewers', key: 'selected' } as const, null)
+// The reviewers the band offers while its review choices are open; null when closed.
+const picker = atom({ plugin: 'third-party-reviewers', key: 'picker' } as const, null)
 
 // Each conversation's ledger is also kept in the store, since `$.state` does not outlive the
 // process; a resumed conversation finds it there.
@@ -365,6 +369,7 @@ async function endSession($: Engine): Promise<void> {
   $.ui.status(undefined)
   await update($, runs, () => [])
   await update($, selected, () => null)
+  await update($, picker, () => null)
 }
 
 async function registerTools($: Engine, i: Installed): Promise<void> {
@@ -514,29 +519,35 @@ export const register: Register = on => {
    * The flow lives in a `ui.press` hook rather than in the Button's `onPress`, because
    * `onPress` is declared `(e) => void`: the engine does not await it, so an async chain
    * started there runs unawaited past the point the engine considers the press finished.
-   * A hook is `($, e, next)` and is awaited, so `$.ui.ask` and `$.prompt.submit` are safe.
+   * A hook is `($, e, next)` and is awaited, so `$.prompt.submit` is safe.
    * A press raises `ui.press` with `onPress` as its bottom, so a hook that answers for
    * itself (returning without `next`) keeps the stub from running.
+   *
+   * The choices are band Buttons rather than `$.ui.ask` dialogs: a dialog is an
+   * AskUserQuestion tool call, so every PreToolUse hook the user has runs before it shows.
    */
   on('ui.press', { element: BUTTON }, async ($, e) => {
     const answered = { element: e.element }
     const i = await ensure($)
     const reviewers = available(i)
-    const [first] = reviewers
-    if (first === undefined) {
+    if (reviewers.length === 0) {
       $.ui.toast(`No reviewer is available. Codex: ${i.errors.codex} Gemini: ${i.errors.gemini}`)
       return answered
     }
-    let who: Reviewer = first
-    if (reviewers.length > 1) {
-      const picked = await $.ui.ask('Which reviewer?', { header: 'Reviewer', options: [...reviewers.map(r => NAME[r]), 'Cancel'] })
-      // Matched against a closed set: a dismissed dialog returns a marker string.
-      const match = reviewers.find(r => NAME[r] === picked)
-      if (match === undefined) return answered
-      who = match
-    }
-    const depth = await $.ui.ask('How far should it go?', { header: 'Depth', options: ['To convergence', 'One round', 'Cancel'] })
-    if (depth !== 'To convergence' && depth !== 'One round') return answered
+    await update($, picker, current => (current === null ? reviewers : null))
+    return answered
+  })
+
+  on('ui.press', { element: CHOICES }, async ($, e) => {
+    const answered = { element: e.element }
+    const [, who, depth] = e.element.split('|') as [string, Reviewer, string]
+    // Two presses before a redraw both land, so only the one that closes the choices submits.
+    let claimed = false
+    await update($, picker, current => {
+      claimed = current?.includes(who) ?? false
+      return claimed ? null : current
+    })
+    if (!claimed) return answered
     // asUser so the transcript reads as the instruction it is, not as a plugin message.
     await $.prompt.submit({ text: instruction(who, depth), asUser: true })
     return answered
@@ -584,15 +595,27 @@ export const register: Register = on => {
     const beneath = await next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const all = await read($, runs)
+    const offered = await read($, picker)
     const open = all.flatMap(r => r.findings).filter(f => outcome(f) === 'unresolved').length
     // Quiet at rest: dim until pointed at, no chrome in a terminal (a desktop draws its own).
+    // The choices are numbered as a survey's rows are, so a bare digit in an empty prompt picks one.
     return (
       <Box gap={2}>
         {beneath}
-        <Box>
-          <Button key={BUTTON} plain dimColor hotkey="r" label="review" onPress={() => {}} />
-          {all.length > 0 ? <Text dimColor> · </Text> : null}
-          {all.length > 0 ? <Button key={FINDINGS} plain dimColor hotkey="f" label={open > 0 ? `findings (${open} open)` : 'findings'} onPress={() => {}} /> : null}
+        <Box flexDirection="column">
+          <Box>
+            <Button key={BUTTON} plain dimColor hotkey="r" label="review" onPress={() => {}} />
+            {all.length > 0 ? <Text dimColor> · </Text> : null}
+            {all.length > 0 ? <Button key={FINDINGS} plain dimColor hotkey="f" label={open > 0 ? `findings (${open} open)` : 'findings'} onPress={() => {}} /> : null}
+          </Box>
+          {(offered ?? []).map((r, i) => (
+            <Box key={r}>
+              <Text dimColor>{`${NAME[r]}: `}</Text>
+              <Button key={choiceKey(r, 'One round')} plain hotkey={`${2 * i + 1}`} label="one round" onPress={() => {}} />
+              <Text dimColor> · </Text>
+              <Button key={choiceKey(r, 'To convergence')} plain hotkey={`${2 * i + 2}`} label="to convergence" onPress={() => {}} />
+            </Box>
+          ))}
         </Box>
       </Box>
     )
