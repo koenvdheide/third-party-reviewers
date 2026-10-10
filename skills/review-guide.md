@@ -4,11 +4,11 @@ Codex and Gemini support every mode below. Read this guide together with the sel
 
 ## When to review
 
-Use an independent review for a concrete artifact or question where another perspective can help. Choose the most specific mode from the catalogue below. Honor a named reviewer or an established user preference. If neither identifies a reviewer and both are available, ask which to use; "a different model" alone names neither provider.
+Run an independent review when the user asks for one, in the conversation or through their own standing instructions, such as a CLAUDE.md rule or a workflow they started. Choose the most specific mode from the catalogue below. Honor a named reviewer or an established user preference. If neither identifies a reviewer and both are available, ask which to use; "a different model" alone names neither provider.
 
 Skip a mechanical edit, an answer already in context, or a simple lookup unless the user explicitly asks for another opinion. Gather missing local facts first: reproduce, read logs, inspect code and history, or ask for facts only the user owns. Use the relevant documentation for Claude Code internals or library/tool questions. Product priority, compliance decisions and release timing belong to the user.
 
-Avoid an unsolicited review during an urgent exchange, and avoid repeating the same question to the same reviewer against unchanged material. An explicitly requested cross-check by another model is valid. Re-review when changes or new evidence could alter a finding's disposition.
+Avoid repeating the same question to the same reviewer against unchanged material. An explicitly requested cross-check by another model is valid. Re-review when changes or new evidence could alter a finding's disposition.
 
 An explicit request overrides cost and session defaults. It does not permit sending secrets, credentials or PII: inspect the payload and exclude them before calling the tool.
 

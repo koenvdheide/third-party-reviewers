@@ -1,14 +1,13 @@
 ---
 name: codex
 description: >-
-  Use when an independent Codex (OpenAI) perspective is requested or useful for a
+  Use when the user asks for an independent Codex (OpenAI) perspective on a
   concrete question or artifact: brainstorming, breakage review, red-teaming, simplification and
   churn reviews, debugging, reviewing
   plans, diffs or prose, extracting requirements, rollout, test gaps, explanation,
-  incident analysis or security hypotheses. Explicit requests naming Codex or an
+  incident analysis or security hypotheses. Requests naming Codex or an
   OpenAI model for that work select this skill. Exclude questions about the
-  provider's API, SDK, pricing or model capabilities. Skip trivial tasks and simple
-  lookups unless a second opinion is explicitly requested.
+  provider's API, SDK, pricing or model capabilities.
 ---
 
 # Codex as a thinking partner

@@ -13,15 +13,26 @@ Codex and Gemini reviews inside [Claude Code](https://claude.ai/code), with live
 ## Prerequisites
 
 - Claude Code v2.1.287 or later, with mods on.
-- At least one signed-in reviewer: the [Codex CLI](https://github.com/openai/codex) (`codex`) or the Antigravity CLI (`agy`).
+- At least one signed-in reviewer: the [Codex CLI](https://github.com/openai/codex) (`codex`) or the [Antigravity CLI](https://antigravity.google/docs/cli/install) (`agy`).
 
 ## Installation
+
+In Claude Code, from the `agent-tools` marketplace:
 
 ```text
 /plugin marketplace add koenvdheide/agent-tools
 /plugin install third-party-reviewers@agent-tools
 /reload-plugins
 ```
+
+## Examples
+
+Prompts that work:
+
+- "Ask Codex to red-team the plan in docs/plan.md."
+- "Have Gemini check my uncommitted changes for breakage."
+- "Get Codex's view on why this test only fails on Windows."
+- "Review this branch with Codex until convergence."
 
 ## What it runs and sends
 
@@ -31,6 +42,12 @@ To find the CLIs, and to clean up after a Gemini review (which runs from a tempo
 
 - On Linux and macOS: `codex --version`, `agy models`, and `rm -rf` on that directory.
 - On Windows: `where.exe codex`, then `--version` on the `codex.exe` it finds (on `PATH` or inside npm's `@openai/codex` package), `agy models`, and PowerShell's `Remove-Item` on that directory.
+
+## Troubleshooting
+
+- No `review` above the prompt: Claude Code draws it only in the terminal and the Desktop app's Code tab, and claude.ai chat and Cowork load no mods. In a terminal, run `/plugin` and check that its `mods active` line names third-party-reviewers. If it doesn't, update Claude Code to v2.1.287 or later and check that `disableAllHooks` or `--safe-mode` isn't stopping mods.
+- A reviewer is missing under `review`, or Claude says its CLI is unavailable: run `codex --version` or `agy models` in a terminal, install or sign in until that works, then start a new session. The plugin looks for the CLIs when a session starts.
+- A review fails: Claude reports the failure, including the CLI's own error when it printed one, such as a sign-in or usage-limit message. Fix the cause it names, then ask again.
 
 ## License
 

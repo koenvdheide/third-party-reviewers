@@ -1,14 +1,13 @@
 ---
 name: antigravity
 description: >-
-  Use when an independent Gemini (Google) perspective is requested or useful for a
+  Use when the user asks for an independent Gemini (Google) perspective on a
   concrete question or artifact: brainstorming, breakage review, red-teaming, simplification and
   churn reviews, debugging, reviewing
   plans, diffs or prose, extracting requirements, rollout, test gaps, explanation,
-  incident analysis or security hypotheses. Explicit requests naming Gemini, a
+  incident analysis or security hypotheses. Requests naming Gemini, a
   Gemini model, Antigravity or agy for that work select this skill. Exclude questions
-  about the provider's API, SDK, pricing or model capabilities. Skip trivial tasks
-  and simple lookups unless a second opinion is explicitly requested.
+  about the provider's API, SDK, pricing or model capabilities.
 ---
 
 # Gemini as a thinking partner
