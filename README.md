@@ -34,14 +34,39 @@ Prompts that work:
 - "Get Codex's view on why this test only fails on Windows."
 - "Review this branch with Codex until convergence."
 
-## What it runs and sends
+## What it runs, sends and writes
 
-Your local `codex`, read-only and with live web search, or `agy`, from a temporary directory as an agent whose only tools read files and fetch URLs. The review, and any file the reviewer reads, go to the provider your CLI is configured for (OpenAI or Google by default). [PRIVACY.md](PRIVACY.md) covers what is sent, to whom, and what is kept.
+The plugin is a mod, code that Claude Code runs. It has no server and makes no network request of its own: a review leaves through the reviewer CLI you installed. [PRIVACY.md](PRIVACY.md) covers what is sent, to whom, and what is kept.
 
-To find the CLIs, and to clean up after a Gemini review (which runs from a temporary directory holding its agent definition), it runs:
+### Programs it runs
 
-- On Linux and macOS: `codex --version`, `agy models`, and `rm -rf` on that directory.
-- On Windows: `where.exe codex`, then `--version` on the `codex.exe` it finds (on `PATH` or inside npm's `@openai/codex` package), `agy models`, and PowerShell's `Remove-Item` on that directory.
+- A Codex review, in the session's working directory, with the review prompt on standard input: `codex exec --json --output-schema <plugin>/schemas/review.schema.json -s read-only -m <model> -c model_reasoning_effort=<effort> -c web_search=live -c model_reasoning_summary=concise --ephemeral`, plus `--skip-git-repo-check` outside a git repository.
+- A Gemini review, in a temporary directory, with the review prompt on standard input as one JSON line: `agy --print= --input-format stream-json --output-format stream-json --json-schema <plugin>/schemas/review.schema.json --agent tpr-reviewer --model <model>`.
+- When a session starts, to find the CLIs and pick the newest supported Gemini Flash model: `codex --version` and `agy models`. On Windows it runs `where.exe codex` first, then `--version` on the `codex.exe` it finds, on `PATH` or in npm's Codex installation (that one with the `CODEX_MANAGED_BY_NPM` and `CODEX_MANAGED_PACKAGE_ROOT` variables npm's launcher sets).
+- To delete a Gemini review's temporary directory: `rm -rf -- <dir>`, or on Windows `powershell.exe -NoProfile -NonInteractive -Command "Remove-Item -LiteralPath $env:TPR_DIR -Recurse -Force"` with the directory in `TPR_DIR`.
+
+### What it sends, and where
+
+- The review prompt: the mode, the question, the instructions, any inline text and the paths of the files to review (for Gemini, the files' contents too), inside the plugin's own framing: the material marked as data, review checklists and the JSON format for the answer. The CLI sends it, and any file the reviewer reads, to the provider it is configured for (OpenAI or Google by default). Codex may also search the web.
+- A prompt to Claude as you, only when you choose one of its buttons (by click or key):
+  - A choice under `review` asks Claude to use the codex or antigravity skill to review whatever you are working on, either one round or through the review guide's convergence workflow (carrying earlier findings forward and stopping for blockers), and to name the target and question in one line first.
+  - Apply, Reject or Withdraw in the findings pane sends a one-line instruction about that finding: make and record the fix, leave it and undo any fix, or go back to Claude's own judgement.
+  - Ask puts `About finding <id> (<title>): ` in the prompt box and sends nothing.
+
+### Files it writes
+
+- `.agents/agents/tpr-reviewer.md` in a Gemini review's temporary directory, `third-party-reviewers/<run id>/` under `TEMP`, `TMPDIR` or `/tmp`. It is the agent definition `agy` loads, which gives the reviewer tools to read and search files, fetch URLs and return its answer, and none that write. The plugin deletes the directory when the review ends, and shows its path if that fails.
+- Each conversation's reviews and decisions, in Claude Code's plugin store, so a resumed conversation has them again.
+
+It writes no other file, and none of your build, settings or instructions files.
+
+### What its hooks change
+
+- When at least one reviewer is available, it registers four tools, `review_start`, `review_results`, `review_record` and `review_cancel`, and answers their calls itself. Other tool calls pass through untouched.
+- When the codex or antigravity skill loads while its CLI is missing, it adds the discovery error to the skill's text, so Claude tells you (and offers the other reviewer, if that one is available).
+- Above the prompt, it adds `review` (and `findings` once there is a review) beside whatever Claude Code and other plugins draw there, and gives the row back while Claude Code shows a survey in it.
+- While a review runs, the status line shows its reviewer, mode, elapsed time and current step. Short notices report a review starting and problems outside a review's result, such as a failed cleanup.
+- When a session starts it trims the store. On a resume it restores that conversation's reviews. A review left running by a reload or an ended conversation is marked cancelled, and when a conversation ends (`/clear` included) the plugin stops the reviews still running.
 
 ## Troubleshooting
 
