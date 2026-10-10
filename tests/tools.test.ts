@@ -319,21 +319,53 @@ describe('resume', () => {
     expect((w.store.get('runs:s1') as any).runs[0].findings[0].status).toBe('unresolved')
   })
 
-  test('a change held across the end of its conversation does not apply when that conversation is resumed', async ($, on) => {
+  test('a run whose conversation ends before it is allocated lands in neither', async ($, on) => {
+    const w = world(on)
+    w.files.set('C:/work/a.ts', 'x')
+    await boot($, w)
+    w.holdRead = true
+    const pending = call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: ['C:/work/a.ts'] } })
+    await w.clock.settle()
+    w.holdRead = false
+    await endSession($)
+    w.sessionId = 's2'
+    w.heldRead.forEach(release => release())
+    expect((await pending).deny).toContain('conversation changed')
+    expect(w.runs()).toEqual([])
+    expect(w.store.has('runs:s2')).toBe(false)
+  })
+
+  test('a run allocated across the end of its conversation lands in neither', async ($, on) => {
+    const w = world(on)
+    await boot($, w)
+    w.holdWrites = true
+    const pending = call($, 'review_start', start)
+    await w.clock.settle()
+    w.holdWrites = false
+    await endSession($)
+    w.sessionId = 's2'
+    w.heldWrites.forEach(release => release())
+    expect((await pending).deny).toContain('conversation changed')
+    expect(w.runs()).toEqual([])
+    expect(w.store.has('runs:s2')).toBe(false)
+  })
+
+  test('a resume waits for a save still in flight', async ($, on) => {
     const w = world(on)
     w.scripts.push({ lines: codexReview([finding({})]) })
     await boot($, w)
     const id = await startOf($)
-    w.holdWrites = true
+    w.holdStore = true
     const pending = call($, 'review_record', { findingId: `${id}.1`, status: 'applied', evidence: 'e' })
     await w.clock.settle()
-    w.holdWrites = false
+    w.holdStore = false
     await endSession($)
-    await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
-    w.heldWrites.forEach(release => release())
-    await pending
-    expect((await resultOf($, id)).findings[0].status).toBe('unresolved')
-    expect((w.store.get('runs:s1') as any).runs[0].findings[0].status).toBe('unresolved')
+    const resumed = $.classic.SessionStart({ source: 'resume', session_id: 's1' })
+    await w.clock.settle()
+    w.heldStore.forEach(release => release())
+    await Promise.all([pending, resumed])
+    expect((await resultOf($, id)).findings[0].status).toBe('applied')
+    expect((w.store.get('runs:s1') as any).runs[0].findings[0].status).toBe('applied')
   })
 
   test('session start drops the least recently saved conversations past the budget, never the current one', async ($, on) => {

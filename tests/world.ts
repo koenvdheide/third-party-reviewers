@@ -16,6 +16,9 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   const w = {
     clock, files, store,
     sessionId: 's1',
+    // With holdRead on, each file read waits here until the test releases it.
+    holdRead: false,
+    heldRead: [] as (() => void)[],
     // With holdStore on, each store write waits here until the test releases it.
     holdStore: false,
     heldStore: [] as (() => void)[],
@@ -46,7 +49,10 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   // The engine rejects a network location, as the real one does.
   const inDir = (dir: string) => [...files.keys()].filter(f => f.startsWith(`${dir}/`))
   on('fs.exists', ($, e) => (key(e.path).startsWith('//') ? { deny: `network location: ${e.path}` } : { value: files.has(key(e.path)) || inDir(key(e.path)).length > 0 }))
-  on('fs.read', ($, e) => (files.has(key(e.path)) ? { value: files.get(key(e.path)) as string } : { deny: `ENOENT: ${e.path}` }))
+  on('fs.read', async ($, e) => {
+    if (w.holdRead) await new Promise<void>(resolve => w.heldRead.push(resolve))
+    return files.has(key(e.path)) ? { value: files.get(key(e.path)) as string } : { deny: `ENOENT: ${e.path}` }
+  })
   on('prompt.fill', ($, e) => {
     w.filled.push({ text: e.text, mode: e.mode })
     return { isFilled: true }

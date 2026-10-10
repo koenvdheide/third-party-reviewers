@@ -132,8 +132,8 @@ async function runDirOf($: Engine, id: string): Promise<string> {
 // stored with the ledger it wrote, so the store holds them in order; a dispatch's own reads
 // would see only its moment. One made before the conversation changed is dropped, on each
 // of update's retries too, so it never lands in, or under the key of, another conversation.
-async function change($: Engine, fn: (list: Run[]) => Run[]): Promise<void> {
-  const gen = generation
+// `gen` is the generation the caller's work began in.
+async function change($: Engine, fn: (list: Run[]) => Run[], gen = generation): Promise<void> {
   const turn = saving.then(async () => {
     const id = await $.session.id()
     const list = await update($, runs, current => (gen === generation ? fn(current) : current))
@@ -147,6 +147,8 @@ async function change($: Engine, fn: (list: Run[]) => Run[]): Promise<void> {
 }
 
 async function restore($: Engine, sessionId: string): Promise<void> {
+  // A write still in flight may be this conversation's latest.
+  await saving
   const saved = (await $.store.get(savedKey(sessionId))) as Saved | undefined
   await update($, runs, () => saved?.runs ?? [])
   await markOrphans($)
@@ -206,13 +208,12 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
   }
   let id = ''
   await change($, list => {
-    if (gen !== generation) return list
     // Random, so an id is unlikely to come back after /clear or a resume; redrawn until
     // no run in the ledger has it.
     do id = `r-${crypto.randomUUID().slice(0, 8)}`
     while (list.some(r => r.id === id))
     return [...list, { ...draft, id }]
-  })
+  }, gen)
   const run: Run = { ...draft, id }
   if (gen !== generation || id === '') return run
 
@@ -262,7 +263,7 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
     if (runDir !== null) await removeDir($, runDir)
     const endedAt = await $.clock.now()
     const failure = `The review failed: ${err instanceof Error ? err.message : String(err)}`
-    await change($, list => list.map(r => (r.id === id ? { ...r, status: 'failed' as const, endedAt, failure } : r)))
+    await change($, list => list.map(r => (r.id === id ? { ...r, status: 'failed' as const, endedAt, failure } : r)), gen)
     return { ...run, status: 'failed', endedAt, failure }
   }
 }
@@ -326,14 +327,15 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
   const status = wasCancelled ? 'cancelled' : outcome.review ? 'complete' : 'failed'
   const endedAt = await $.clock.now()
   if (gen !== generation) return
-  await change($, list =>
-    gen !== generation
-      ? list
-      : list.map(r =>
-          r.id !== run.id
-            ? r
-            : { ...r, status, endedAt, response: outcome.review?.response ?? null, verdict: outcome.review?.verdict ?? null, findings, deniedSteps: outcome.deniedSteps, stderr: outcome.stderr, failure: outcome.failure },
-        ),
+  await change(
+    $,
+    list =>
+      list.map(r =>
+        r.id !== run.id
+          ? r
+          : { ...r, status, endedAt, response: outcome.review?.response ?? null, verdict: outcome.review?.verdict ?? null, findings, deniedSteps: outcome.deniedSteps, stderr: outcome.stderr, failure: outcome.failure },
+      ),
+    gen,
   )
 }
 
