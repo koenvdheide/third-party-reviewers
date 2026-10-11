@@ -128,10 +128,11 @@ async function runDirOf($: Engine, id: string): Promise<string> {
   return `${tmp}/third-party-reviewers/${id}`
 }
 
-// Every change to the ledger but the session-end wipe goes through here. Changes queue, each
-// stored with the ledger it wrote, so the store holds them in order; a dispatch's own reads
-// would see only its moment. One made before the conversation changed is dropped, on each
-// of update's retries too, so it never lands in, or under the key of, another conversation.
+// Every ledger change saved to the store goes through here; restore, markOrphans and the
+// session-end wipe write `$.state` only. Changes queue, each stored with the ledger it
+// wrote, so the store holds them in order; a dispatch's own reads would see only its
+// moment. One made before the conversation changed is dropped, on each of update's retries
+// too, so it never lands in, or under the key of, another conversation.
 // `gen` is the generation the caller's work began in.
 async function change($: Engine, fn: (list: Run[]) => Run[], gen = generation): Promise<void> {
   const turn = saving.then(async () => {
