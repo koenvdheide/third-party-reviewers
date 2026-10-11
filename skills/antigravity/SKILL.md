@@ -24,7 +24,7 @@ If this skill includes a discovery failure, report its diagnostic and use the re
 
 ## Model and effort
 
-The tool selects the newest Gemini Flash release on offer and sets effort from the mode. Override `model` with a base ID without an effort suffix and `effort` with `low`, `medium` or `high` when requested or justified by the material. The tool accepts no higher Gemini effort. Report the exact returned model and effort in the summary.
+The tool selects the newest Gemini Flash release on offer and sets effort from the mode. Override `model` with a base ID without an effort suffix and `effort` with `low`, `medium` or `high` when requested or justified by the material. The tool accepts no higher Gemini effort. The tool asks agy for `<model>-<effort>` without checking `agy models`, so pick an effort that model offers. Report the exact returned model and effort in the summary.
 
 `agy` also serves `claude-*` models. Selecting one changes the requested model family: explain that before using it and proceed only if the user wants it. Label that result as same-family when Claude is the host.
 

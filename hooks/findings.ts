@@ -7,7 +7,7 @@ export const STATUSES: readonly FindingStatus[] = ['applied', 'rejected', 'unres
 const NEAR = 3
 
 // `text` is the cited file's contents, null when the file is missing, undefined when it
-// exists but could not be read (over the engine's 4 MiB read limit).
+// could not be read or checked (over the engine's 4 MiB read limit, a network location).
 export function citationOf(f: RawFinding, text: string | null | undefined): Citation {
   if (f.file === null) return 'no-location'
   if (text === null) return 'file-missing'
