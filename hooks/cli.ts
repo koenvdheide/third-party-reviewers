@@ -165,7 +165,17 @@ export function codexParser(): Parser {
   let last: string | null = null
   let completed = false
   let failure: string | null = null
+  let lastError: string | null = null
+  let err = ''
+  let cut = false
   return {
+    stderr(text) {
+      err += text
+      if (err.length > STDERR_KEPT) {
+        err = err.slice(-STDERR_KEPT)
+        cut = true
+      }
+    },
     line(event) {
       const e = event as Json
       if (e?.type === 'item.started' && e.item?.type === 'command_execution') return `running ${String(e.item.command ?? '').slice(0, 60)}`
@@ -175,11 +185,18 @@ export function codexParser(): Parser {
         return 'answering'
       }
       if (e?.type === 'turn.completed') completed = true
-      if (e?.type === 'turn.failed' || e?.type === 'error') failure = String(e.error?.message ?? e.message ?? 'Codex reported an error')
+      if (e?.type === 'turn.failed' || e?.type === 'error') {
+        const message = String(e.error?.message ?? e.message ?? 'Codex reported an error')
+        // An error event can be one the turn retried past; only turn.failed ends the run.
+        if (e.type === 'turn.failed') failure = message
+        else lastError = message
+      }
       return null
     },
     finish(exitCode) {
-      const fail = (why: string): Outcome => ({ review: null, failure: why, deniedSteps: [] })
+      const printed = err.trim() === '' ? '' : `; Codex printed: ${cut ? '...' : ''}${err.trim()}`
+      const reported = failure === null && lastError !== null ? `; Codex reported: ${lastError}` : ''
+      const fail = (why: string): Outcome => ({ review: null, failure: why + reported + printed, deniedSteps: [] })
       if (failure !== null) return fail(`Codex failed: ${failure}`)
       if (exitCode !== 0) return fail(`Codex exited ${exitCode}`)
       if (!completed) return fail('Codex ended without turn.completed')
