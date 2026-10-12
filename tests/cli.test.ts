@@ -123,7 +123,7 @@ describe('streams', () => {
     failed.line({ type: 'turn.failed', error: { message: 'usage limit' } })
     expect(failed.finish(1).failure).toBe('Codex failed: usage limit')
   })
-  test('codex stderr: its end on failure, nothing on success', () => {
+  test('codex stderr: its end on a failure Codex did not explain, nothing otherwise', () => {
     const ok = codexParser()
     ok.stderr?.('warning: slow start\n')
     ok.line({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify(review) } })
@@ -132,6 +132,10 @@ describe('streams', () => {
     const bad = codexParser()
     bad.stderr?.('error: not signed in\n')
     expect(bad.finish(3).failure).toBe('Codex exited 3; Codex printed: error: not signed in')
+    const told = codexParser()
+    told.stderr?.('ERROR failed to connect to websocket: 401 Unauthorized\n')
+    told.line({ type: 'turn.failed', error: { message: 'unexpected status 401 Unauthorized' } })
+    expect(told.finish(1).failure).toBe('Codex failed: unexpected status 401 Unauthorized')
     const loud = codexParser()
     for (let i = 0; i < 30; i++) loud.stderr?.(`progress ${i} ${'x'.repeat(200)}\n`)
     loud.stderr?.('error: out of credits')

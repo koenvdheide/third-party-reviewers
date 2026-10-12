@@ -194,7 +194,8 @@ export function codexParser(): Parser {
       return null
     },
     finish(exitCode) {
-      const printed = err.trim() === '' ? '' : `; Codex printed: ${cut ? '...' : ''}${err.trim()}`
+      // Prefer the structured turn failure over noisy stderr.
+      const printed = failure === null && err.trim() !== '' ? `; Codex printed: ${cut ? '...' : ''}${err.trim()}` : ''
       const reported = failure === null && lastError !== null ? `; Codex reported: ${lastError}` : ''
       const fail = (why: string): Outcome => ({ review: null, failure: why + reported + printed, deniedSteps: [] })
       if (failure !== null) return fail(`Codex failed: ${failure}`)
