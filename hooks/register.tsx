@@ -4,8 +4,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Finding, FindingStatus, Reviewer, Run } from '../types'
 import { AGY_AGENT_FILE, AGY_AGENT_TEXT, CODEX_MODEL, EFFORTS, Lines, NAME, SAFE_ID, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash, snapshot } from './cli'
 import type { Exe, Outcome, Parser, RawFinding } from './cli'
-import { STATUSES, applyOverrule, applyRecord, citationOf, findingOf, outcome, overrulePrompt } from './findings'
-import type { RecordResult } from './findings'
+import { STATUSES, applyOverrule, applyRecord, citationOf, findingOf, outcome, overrulePrompt, tallyOf } from './findings'
+import type { RecordResult, Tally } from './findings'
 import { PANE, paneTree } from './pane'
 
 // Everything that calls the engine lives in this file: the mod loader follows `$` only into
@@ -33,6 +33,9 @@ const picker = atom({ plugin: 'third-party-reviewers', key: 'picker' } as const,
 // process; a resumed conversation finds it there.
 type Saved = { savedAt: number; runs: Run[] }
 const savedKey = (sessionId: string) => `runs:${sessionId}`
+// A pruned conversation's finding counts, by run id, so the record of every review outlives
+// its ledger and a resumed conversation's later runs add to it.
+const tallyKey = (runsKey: string) => `tally:${runsKey.slice('runs:'.length)}`
 // Half the store's 4 MiB, so the conversation in progress has room to grow.
 const STORE_BUDGET = 2 * 1024 * 1024
 let saving: Promise<void> = Promise.resolve()
@@ -165,7 +168,15 @@ async function prune($: Engine): Promise<void> {
   let size = bytes(await $.store.get(current))
   for (const { key, saved } of others.sort((a, b) => b.saved.savedAt - a.saved.savedAt)) {
     size += bytes(saved)
-    if (size > STORE_BUDGET) await $.store.delete(key)
+    if (size <= STORE_BUDGET) continue
+    const kept = (await $.store.get(tallyKey(key))) as Record<string, Tally> | undefined
+    const counts = { ...kept, ...Object.fromEntries(saved.runs.map(r => [r.id, tallyOf([r])])) }
+    // At the store's cap the counts fit only once the ledger is gone.
+    await $.store.set(tallyKey(key), counts).catch(async () => {
+      await $.store.delete(key)
+      await $.store.set(tallyKey(key), counts)
+    })
+    await $.store.delete(key)
   }
 }
 

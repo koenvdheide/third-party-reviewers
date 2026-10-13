@@ -28,6 +28,13 @@ export function outcome(f: Finding): FindingStatus {
   return f.status
 }
 
+export type Tally = { total: number; applied: number; rejected: number }
+
+export function tallyOf(all: readonly Run[]): Tally {
+  const outcomes = all.flatMap(r => r.findings.map(outcome))
+  return { total: outcomes.length, applied: outcomes.filter(o => o === 'applied').length, rejected: outcomes.filter(o => o === 'rejected').length }
+}
+
 export function findingOf(all: readonly Run[], findingId: string): Finding | undefined {
   const runId = findingId.slice(0, findingId.lastIndexOf('.'))
   return all.find(r => r.id === runId)?.findings.find(f => f.id === findingId)
