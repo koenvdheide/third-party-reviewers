@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { applyOverrule, applyRecord, citationOf, outcome, overrulePrompt } from '../hooks/findings'
+import { applyOverrule, applyRecord, citationOf, outcome, overrulePrompt, tallyOf } from '../hooks/findings'
 import type { Finding, Run } from '../types'
 
 const raw = (o: Partial<Finding>) => ({ severity: 'breakage', title: 't', claim: 'c', file: 'a.ts', line: 2, symbol: 'add', ...o })
@@ -42,6 +42,9 @@ describe('judgement and overrule', () => {
     expect(outcome({ ...f('a.1'), status: 'applied' })).toBe('applied')
     expect(outcome({ ...f('a.1'), status: 'rejected', overrule: 'apply' })).toBe('unresolved')
     expect(outcome({ ...f('a.1'), status: 'applied', overrule: 'apply' })).toBe('applied')
+  })
+  test('the tally counts outcomes', () => {
+    expect(tallyOf([...all, run('r-2', [{ ...f('r-2.1'), status: 'applied' }])])).toEqual({ total: 4, applied: 1, rejected: 1 })
   })
   test('an overrule is set and withdrawn; an unknown finding changes nothing', () => {
     const rejected = applyOverrule(all, 'r-1.1', 'reject')
