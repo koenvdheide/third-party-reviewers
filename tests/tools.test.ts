@@ -403,6 +403,18 @@ describe('resume', () => {
     expect(w.store.get(`count:s1/${id}`)).toEqual([1, 0, 0])
   })
 
+  test('session start repairs a stale count before pruning its ledger', async ($, on) => {
+    const w = world(on)
+    const MiB = 1024 * 1024
+    const saved = (savedAt: number, size: number) => ({ savedAt, runs: [{ id: 'r', response: 'x'.repeat(size), findings: [{ status: 'applied', overrule: null }] }] })
+    w.store.set('runs:new', saved(3, 1.5 * MiB))
+    w.store.set('runs:old', saved(1, 0.75 * MiB))
+    w.store.set('count:old/r', [1, 0, 0])
+    await boot($, w)
+    expect(w.store.has('runs:old')).toBe(false)
+    expect(w.store.get('count:old/r')).toEqual([1, 1, 0])
+  })
+
   test('a ledger whose runs cannot be counted is not pruned', async ($, on) => {
     const MiB = 1024 * 1024
     const saved = (savedAt: number, size: number) => ({ savedAt, runs: [{ id: `r-${savedAt}`, response: 'x'.repeat(size), findings: [{ status: 'rejected', overrule: null }] }] })
