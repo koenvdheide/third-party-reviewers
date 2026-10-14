@@ -4,7 +4,7 @@ Codex and Gemini reviews inside [Claude Code](https://claude.ai/code), with live
 
 ## What it does
 
-- `review_start` runs a review and returns its result; `review_results` reads a run again; `review_cancel` stops one.
+- `review_start` starts a review and returns at once, and the plugin tells Claude when it ends; `review_results` reads a run; `review_cancel` stops one.
 - `review_record`: Claude records what it did with each finding, with its evidence: applied, rejected or unresolved. Each finding also gets a quick textual check of the file, line and symbol it cites.
 - The findings pane, from `findings` above the prompt: every review in the conversation, each finding with Claude's judgement. Apply or Reject overrules it, and Ask starts a question about a finding.
 - The `/codex` and `/antigravity` skills offer the same modes and use one [review guide](skills/review-guide.md) for mode prompts, evidence standards and finding handling. Each skill supplies its own model, file-access, permission and recovery instructions.
@@ -48,6 +48,7 @@ The plugin is a mod, code that Claude Code runs. It has no server and makes no n
 ### What it sends, and where
 
 - The review prompt: the mode, the question, the instructions, any inline text and the paths of the files to review (for Gemini, the files' contents too), inside the plugin's own framing: the material marked as data, review checklists and the JSON format for the answer. The CLI sends it, and any file the reviewer reads, to the provider it is configured for (OpenAI or Google by default). Codex may also search the web.
+- A message to Claude, under the plugin's name, when a review ends: the reviewer, mode and run id, with the verdict and finding count or the failure. In a `-p` run the review's result comes back from `review_start` instead.
 - A prompt to Claude as you, only when you choose one of its buttons (by click or key):
   - A choice under `review` asks Claude to use the codex or antigravity skill to review whatever you are working on, either one round or through the review guide's convergence workflow (carrying earlier findings forward and stopping for blockers), and to name the target and question in one line first.
   - Apply, Reject or Withdraw in the findings pane sends a one-line instruction about that finding: make and record the fix, leave it and undo any fix, or go back to Claude's own judgement.

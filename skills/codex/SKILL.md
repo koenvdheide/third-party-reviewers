@@ -18,7 +18,7 @@ Before selecting a mode, starting a review or handling results, read the [shared
 
 Use `review_start` with `reviewer: "codex"` and the mode, question, instructions and artifact described in the shared guide. Use `review_record` for finding dispositions.
 
-The tool runs the Codex CLI in its read-only sandbox, from the current session directory, with live web search and an ephemeral session. `artifact.files` are absolute paths Codex reads from disk; `artifact.text` is inline material. Prefer files when surrounding code matters, and keep the reviewed files unchanged until the call returns.
+The tool runs the Codex CLI in its read-only sandbox, from the current session directory, with live web search and an ephemeral session. `artifact.files` are absolute paths Codex reads from disk; `artifact.text` is inline material. Prefer files when surrounding code matters, and keep the reviewed files unchanged until the review ends.
 
 If this skill includes a discovery failure, report its diagnostic and use the recovery guidance below; availability is checked again when a new session starts. If `review_start` is unavailable without that diagnostic, check CLI discovery and mod loading: reviews require this plugin enabled in Claude Code v2.1.287 or later with mods on; claude.ai and Cowork load no mods.
 

@@ -25,6 +25,8 @@ Call `review_start` using the selected entry skill's provider and operational in
 
 The tool's [prompt builder](../hooks/cli.ts) owns data-only framing, the ownership checklist, the simplicity bar and the structured output contract. It adds them to each prompt, omitting the ownership checklist for `explain` and limiting ownership and simplicity findings to evidenced failures for `breakage-review`. Keep those instructions in the runtime; pass the mode instructions and task context here.
 
+`review_start` returns the run while the reviewer works, and the plugin sends a message naming the run once the review ends. Meanwhile, end the turn or carry on with other work that leaves the reviewed files unchanged. Where nothing draws, as in a `-p` run, `review_start` waits and returns the result itself. The message reaches the main conversation only: a subagent or teammate that starts a review hands the run id and what the review is for back to its parent and stops, and the main conversation reads the result and owns the dispositions and any further round.
+
 ## Mode catalogue
 
 Supply the relevant material and use the corresponding instructions below. Use `simplify` to reduce complexity in a design or working system; use `churn-review` to assess the necessity of a particular change against its brief and base state. A change can simplify code while still being outside the task.
@@ -89,6 +91,8 @@ Preserve necessary cross-file updates, established generation and formatting wor
 - **Prose**: "Review the draft against its intended reader, purpose and supplied sources. Flag unsupported or overstated claims, unclear reasoning, missing information the reader needs, and wording that can be cut without losing meaning. Distinguish factual errors from editorial preferences. Cite the passage and its supporting or contradicting source where available; identify claims that cannot be verified from the supplied evidence. Preserve the author's voice and propose the smallest correction."
 
 ## Handling results
+
+When the plugin's message names a finished run, read it with `review_results` and handle it as below; a convergence loop takes its next round from there. Call `review_results` before the message only for a run the user asks about, and do not poll it.
 
 Separate process status from review coverage. A `complete` run means the tool accepted a result; it does not establish that the reviewer read all necessary evidence. Apply the provider's diagnostic instructions, identify material gaps, and state which conclusions those gaps prevent. Verified findings from a complete but limited review can still be presented with that scope made explicit. A `failed` or `cancelled` run supplies no accepted findings: report its status and available explanation, then follow the provider's recovery instructions.
 

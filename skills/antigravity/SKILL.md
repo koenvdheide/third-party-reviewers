@@ -18,7 +18,7 @@ Before selecting a mode, starting a review or handling results, read the [shared
 
 Use `review_start` with `reviewer: "gemini"` and the mode, question, instructions and artifact described in the shared guide. Use `review_record` for finding dispositions.
 
-The tool runs the Antigravity CLI (`agy`) from a temporary directory as an agent with read-only tools. `artifact.files` are absolute paths of UTF-8 text files: the tool reads them and puts numbered snapshots into the prompt. Those supplied contents need no Antigravity file permissions. `artifact.text` is inline material. Keep the reviewed files unchanged until the call returns, because citation checks read them from disk at the end.
+The tool runs the Antigravity CLI (`agy`) from a temporary directory as an agent with read-only tools. `artifact.files` are absolute paths of UTF-8 text files: the tool reads them and puts numbered snapshots into the prompt. Those supplied contents need no Antigravity file permissions. `artifact.text` is inline material. Keep the reviewed files unchanged until the review ends, because citation checks read them from disk at the end.
 
 If this skill includes a discovery failure, report its diagnostic and use the recovery guidance below; availability is checked again when a new session starts. If `review_start` is unavailable without that diagnostic, check CLI discovery and mod loading: reviews require this plugin enabled in Claude Code v2.1.287 or later with mods on; claude.ai and Cowork load no mods.
 
