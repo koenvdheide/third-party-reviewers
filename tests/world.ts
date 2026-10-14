@@ -1,5 +1,5 @@
 import { mock } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, RenderSurface } from 'claude-code'
 
 export type Script = { lines?: unknown[]; stderr?: string[]; exit?: number; silent?: boolean; error?: string }
 
@@ -7,7 +7,7 @@ const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isSt
 
 export const CODEX_EXE = 'C:/u/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
 
-export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean | string; storeCap?: number } = {}) {
+export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; failPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean | string; storeCap?: number } = {}) {
   const clock = mock.clock(on)
   mock.env(on, { OS: 'Windows_NT', TEMP: 'C:/tmp/tpr' })
   const files = new Map<string, string>([[CODEX_EXE, '']])
@@ -35,6 +35,12 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
     // With holdWrites on, each write of the runs ledger waits here until the test releases it.
     holdWrites: false,
     heldWrites: [] as (() => void)[],
+    // Where the session draws; empty, as in a -p run, review_start waits for the review.
+    surfaces: [] as RenderSurface[],
+    // Each silent child waits here until the test lets it write its lines.
+    waiting: [] as (() => void)[],
+    // That many writes of the runs ledger are refused.
+    failRunsWrites: 0,
     seed(runs: unknown[]) {
       state.set('third-party-reviewers/runs', { value: runs, version: 1 })
     },
@@ -72,6 +78,10 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   })
   on('state.set', async ($, e: any) => {
     if (w.holdWrites && e.key === 'runs') await new Promise<void>(resolve => w.heldWrites.push(resolve))
+    if (w.failRunsWrites > 0 && e.key === 'runs') {
+      w.failRunsWrites -= 1
+      return { deny: 'EIO: the ledger write failed' }
+    }
     const k = `${e.plugin}/${e.key}`
     const current = state.get(k)?.version ?? 0
     if (e.ifVersion !== undefined && e.ifVersion !== current) return { value: { isSet: false, version: current } }
@@ -98,6 +108,7 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
     return { value: 'C:/work' }
   })
   on('session.repo', () => ({ value: { root: 'C:/work', remote: null, internal: false, name: null } }))
+  on('session.surfaces', () => ({ value: w.surfaces }))
   on('ui.toast', ($, e) => {
     w.toasts.push(e.text)
     return { value: undefined }
@@ -128,14 +139,18 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   on('process.spawn', async function* ($, e, next) {
     w.spawns.push({ argv: e.argv, cwd: e.cwd, input: e.input })
     const s = w.scripts.shift() ?? {}
-    // A silent child writes nothing until it is killed, which aborts this dispatch.
-    if (s.silent) await new Promise<void>(resolve => next.signal.addEventListener('abort', () => resolve()))
+    // A silent child writes nothing until it is killed, which aborts this dispatch, or the test lets it go.
+    if (s.silent) await new Promise<void>(resolve => {
+      w.waiting.push(resolve)
+      next.signal.addEventListener('abort', () => resolve())
+    })
     for (const l of s.lines ?? []) yield { stream: 'stdout' as const, text: JSON.stringify(l) + '\n' }
     for (const l of s.stderr ?? []) yield { stream: 'stderr' as const, text: l + '\n' }
     if (s.error) return { deny: s.error }
     return { value: { code: s.exit ?? 0, signal: null } }
   })
   on('prompt.submit', async ($, e) => {
+    if (opts.failPrompts) throw new Error('the prompt hook failed')
     if (opts.dropPrompts) return { drop: 'blocked by a policy hook' }
     if (opts.holdPrompts) {
       const answer = await new Promise<{ drop?: string }>(resolve => w.held.push(resolve))

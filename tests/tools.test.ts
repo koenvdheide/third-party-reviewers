@@ -231,6 +231,140 @@ describe('runs', () => {
   })
 })
 
+describe('background', () => {
+  // What a call has answered once the event loop settles; undefined while it still waits.
+  const answerOf = async (w: ReturnType<typeof world>, pending: Promise<any>) => {
+    let answer: any
+    void pending.then(a => (answer = a))
+    await w.clock.settle()
+    return answer
+  }
+
+  test('with a surface the call returns the run at once and one message announces its end', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true, lines: codexReview([finding({}), finding({ title: 'second' })]) })
+    await boot($, w)
+    const pending = call($, 'review_start', start)
+    const early = await answerOf(w, pending)
+    const sentEarly = w.submitted.length
+    w.waiting.shift()?.()
+    await pending
+    await w.clock.settle()
+    const r = JSON.parse(early?.result ?? '{}')
+    expect(r.status).toBe('running')
+    expect(r.activity).toBe('starting')
+    expect(typeof r.elapsedMs).toBe('number')
+    expect(sentEarly).toBe(0)
+    expect((await resultOf($, r.id)).status).toBe('complete')
+    expect(w.submitted).toEqual([`Codex red-team review ${r.id} finished: "v", 2 findings. Read it with review_results ${r.id}.`])
+    expect(w.origins[0]).toMatchObject({ kind: 'plugin', name: 'third-party-reviewers' })
+    expect((w.origins[0] as { asUser?: boolean }).asUser).toBe(undefined)
+  })
+
+  test('with no surface the call waits for the review and nothing is submitted', async ($, on) => {
+    const w = world(on)
+    w.scripts.push({ lines: codexReview([finding({})]) })
+    await boot($, w)
+    const r = JSON.parse((await call($, 'review_start', start)).result)
+    await w.clock.settle()
+    expect(r.status).toBe('complete')
+    expect(r.findings.length).toBe(1)
+    expect(w.submitted).toEqual([])
+  })
+
+  test('a run that fails at once is announced with the first line of its failure', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ exit: 1, stderr: ['not signed in', 'run codex login'] })
+    await boot($, w)
+    const { id } = JSON.parse((await call($, 'review_start', start)).result)
+    await w.clock.settle()
+    expect((await resultOf($, id)).status).toBe('failed')
+    expect(w.submitted).toEqual([`Codex red-team review ${id} failed: Codex exited 1; Codex printed: not signed in. Read it with review_results ${id}.`])
+  })
+
+  test('a ledger write refused as the run settles records it failed and announces that', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true, lines: codexReview([]) })
+    await boot($, w)
+    const pending = call($, 'review_start', start)
+    const early = await answerOf(w, pending)
+    const id = w.runs()[0]?.id ?? ''
+    w.failRunsWrites = 1
+    w.waiting.shift()?.()
+    await pending
+    await w.clock.settle()
+    expect(JSON.parse(early?.result ?? '{}').status).toBe('running')
+    const r = await resultOf($, id)
+    expect(r.status).toBe('failed')
+    expect(r.failure).toContain('The review failed:')
+    expect(r.failure).toContain('EIO')
+    expect(w.submitted).toEqual([`Codex red-team review ${id} failed: ${r.failure}. Read it with review_results ${id}.`])
+  })
+
+  test('a cancelled run whose ledger write is refused as it settles stays cancelled and is not announced', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true })
+    await boot($, w)
+    void call($, 'review_start', start)
+    await w.clock.settle()
+    const id = w.runs()[0]?.id ?? ''
+    w.failRunsWrites = 1
+    expect((await call($, 'review_cancel', { runId: id })).result).toContain('Cancelled')
+    await w.clock.settle()
+    const r = await resultOf($, id)
+    expect(r.status).toBe('cancelled')
+    expect(r.failure).toContain('EIO')
+    expect(w.submitted).toEqual([])
+  })
+
+  for (const { name, opts } of [
+    { name: 'a refused message', opts: { dropPrompts: true } },
+    { name: 'a message whose submission fails', opts: { failPrompts: true } },
+  ]) {
+    test(`${name} leaves the run complete and names it in a toast`, async ($, on) => {
+      const w = world(on, opts)
+      w.surfaces = ['desktop']
+      w.scripts.push({ silent: true, lines: codexReview([finding({})]) })
+      await boot($, w)
+      const pending = call($, 'review_start', start)
+      const early = await answerOf(w, pending)
+      const id = w.runs()[0]?.id ?? ''
+      w.waiting.shift()?.()
+      await pending
+      await w.clock.settle()
+      expect(JSON.parse(early?.result ?? '{}').status).toBe('running')
+      const r = await resultOf($, id)
+      expect(r.status).toBe('complete')
+      expect(r.findings.length).toBe(1)
+      expect(w.toasts).toContain(`Codex red-team review ${id} has ended; ask Claude to read it with review_results ${id}.`)
+    })
+  }
+
+  test('a run stopped by review_cancel or by the end of its conversation is not announced', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true }, { silent: true })
+    await boot($, w)
+    const first = call($, 'review_start', start)
+    await w.clock.settle()
+    const second = call($, 'review_start', start)
+    await w.clock.settle()
+    const [cancelled, ended] = w.runs().map(r => r.id)
+    expect((await call($, 'review_cancel', { runId: cancelled })).result).toContain('Cancelled')
+    await w.clock.settle()
+    expect((await resultOf($, cancelled ?? '')).status).toBe('cancelled')
+    await endSession($)
+    await Promise.all([first, second])
+    await w.clock.settle()
+    expect((await call($, 'review_results', { runId: ended })).deny).toContain('no run')
+    expect(w.submitted).toEqual([])
+  })
+})
+
 describe('records', () => {
   test('concurrent records both land; unknown and bad status refused', async ($, on) => {
     const w = world(on)

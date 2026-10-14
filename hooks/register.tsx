@@ -228,7 +228,9 @@ type StartRequest = {
   exe: Exe
 }
 
-async function startRun($: Engine, req: StartRequest, gen: number, signal: AbortSignal): Promise<Run> {
+// Resolves once the child's spawn is requested, or once the run ended before that, with the run
+// and what the review settles to: the run once the ledger holds its end, or the failed run.
+async function startRun($: Engine, req: StartRequest, gen: number, signal: AbortSignal): Promise<{ run: Run; settled: Promise<Run> }> {
   const startedAt = await $.clock.now()
   const draft: Run = {
     id: '', reviewer: req.reviewer, mode: req.mode, model: req.model, effort: req.effort, targets: req.files,
@@ -243,9 +245,19 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
     return [...list, { ...draft, id }]
   }, gen)
   const run: Run = { ...draft, id }
-  if (gen !== generation || id === '') return run
+  if (gen !== generation || id === '') return { run, settled: Promise.resolve(run) }
 
   let runDir: string | null = null
+  const fail = async (err: unknown): Promise<Run> => {
+    const endedAt = await $.clock.now()
+    const failure = `The review failed: ${err instanceof Error ? err.message : String(err)}`
+    // A stop that was asked for stays a cancellation, whatever failed after it.
+    const status = cancelled.delete(id) || signal.aborted ? ('cancelled' as const) : ('failed' as const)
+    await change($, list => list.map(r => (r.id === id ? { ...r, status, endedAt, failure } : r)), gen)
+    // After the row, as in consume.
+    if (runDir !== null) await removeDir($, runDir).catch(() => undefined)
+    return { ...run, status, endedAt, failure }
+  }
   try {
     const root = await $.session.cwd()
     const isRepo = (await $.session.repo()) !== null
@@ -271,7 +283,7 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
     }
     if (gen !== generation) {
       if (runDir !== null) await removeDir($, runDir)
-      return run
+      return { run, settled: Promise.resolve(run) }
     }
     const label = `${NAME[req.reviewer]} · ${req.mode}`
     progress.set(id, { label, startedAt, activity: 'starting' })
@@ -282,17 +294,13 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
     tick($)
     const target = req.files.length > 0 ? req.files.map(f => f.split(/[\\/]/).pop()).join(', ') : 'inline text'
     $.ui.toast(`${label} started on ${target}`)
-    // The call waits for the review: stream waits cost no hook budget, and an interrupt
-    // aborts the call, which kills the child.
+    // An interrupt before the call returns aborts it, which kills the child; after that the
+    // child runs on, and stream waits cost no hook budget.
     // Citations resolve against the reviewer's own working directory.
-    await consume($, run, stream, parser, runDir, runDir ?? root, gen, signal)
-    return run
+    return { run, settled: consume($, run, stream, parser, runDir, runDir ?? root, gen, signal).then(() => run, fail) }
   } catch (err) {
-    if (runDir !== null) await removeDir($, runDir)
-    const endedAt = await $.clock.now()
-    const failure = `The review failed: ${err instanceof Error ? err.message : String(err)}`
-    await change($, list => list.map(r => (r.id === id ? { ...r, status: 'failed' as const, endedAt, failure } : r)), gen)
-    return { ...run, status: 'failed', endedAt, failure }
+    const failed = await fail(err)
+    return { run: failed, settled: Promise.resolve(failed) }
   }
 }
 
@@ -343,19 +351,17 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
   })
   progress.delete(run.id)
   stoppers.delete(run.id)
-  const wasCancelled = cancelled.delete(run.id) || signal.aborted
+  const wasCancelled = cancelled.has(run.id) || signal.aborted
   const outcome: Outcome = wasCancelled ? { review: null, failure: null, deniedSteps: [] } : parser.finish(exit?.code ?? null)
   if (!wasCancelled && streamFailure !== null) {
     outcome.review = null
     outcome.failure = [streamFailure, outcome.failure].filter(Boolean).join('; ')
   }
   const findings = outcome.review && gen === generation ? await toFindings($, run.id, outcome.review.findings, citeRoot) : []
-  if (runDir !== null) await removeDir($, runDir)
 
   const status = wasCancelled ? 'cancelled' : outcome.review ? 'complete' : 'failed'
   const endedAt = await $.clock.now()
-  if (gen !== generation) return
-  await change(
+  if (gen === generation) await change(
     $,
     list =>
       list.map(r =>
@@ -365,6 +371,9 @@ async function consume($: Engine, run: Run, stream: Stream, parser: Parser, runD
       ),
     gen,
   )
+  cancelled.delete(run.id)
+  // After the row, so a cleanup that fails cannot fail the review.
+  if (runDir !== null) await removeDir($, runDir).catch(() => undefined)
 }
 
 async function cancelRun(id: string): Promise<boolean> {
@@ -373,6 +382,30 @@ async function cancelRun(id: string): Promise<boolean> {
   cancelled.add(id)
   await stop()
   return true
+}
+
+// A run as review_start and review_results return it.
+async function asResult($: Engine, run: Run): Promise<{ result: string }> {
+  const now = await $.clock.now()
+  const extra = run.status === 'running'
+    ? { elapsedMs: now - run.startedAt, activity: progress.get(run.id)?.activity ?? 'starting' }
+    : { durationMs: (run.endedAt ?? now) - run.startedAt }
+  return { result: JSON.stringify({ ...run, ...extra }, null, 2) }
+}
+
+// The plugin's message to the conversation that started a review, once the review ends; a run
+// that was cancelled, or whose conversation ended, gets none.
+async function announce($: Engine, settled: Promise<Run>, gen: number): Promise<void> {
+  const { id } = await settled
+  const run = (await read($, runs)).find(r => r.id === id)
+  if (gen !== generation || run === undefined || run.status === 'running' || run.status === 'cancelled') return
+  const name = `${NAME[run.reviewer]} ${run.mode} review ${run.id}`
+  const n = run.findings.length
+  const end = run.status === 'complete'
+    ? `finished: ${JSON.stringify(run.verdict)}, ${n} ${n === 1 ? 'finding' : 'findings'}`
+    : `failed: ${(run.failure ?? '').split(/\r?\n/)[0]}`
+  const sent = await $.prompt.submit({ text: `${name} ${end}. Read it with review_results ${run.id}.` }).catch((err: unknown) => ({ drop: String(err) }))
+  if (sent.drop !== undefined) $.ui.toast(`${name} has ended; ask Claude to read it with review_results ${run.id}.`)
 }
 
 // After a reload the children are gone with the old module, but `$.state` keeps their rows; a
@@ -410,7 +443,7 @@ async function registerTools($: Engine, i: Installed): Promise<void> {
   const names = reviewers.map(r => NAME[r]).join(' or ')
   await $.tool.register({
     name: 'review_start',
-    description: `Run an independent review by ${names} and wait for its result. Read the codex or antigravity skill and its required skills/review-guide.md for mode instructions and handling findings; the provider skill supplies execution and recovery rules.`,
+    description: `Start an independent review by ${names}. Returns the run at once while the reviewer works; when it ends, the plugin sends a message naming the run: read the result then with review_results, without polling. Where nothing draws, as in a -p run, the call waits and returns the result. Read the codex or antigravity skill and its required skills/review-guide.md for mode instructions and handling findings; the provider skill supplies execution and recovery rules.`,
     inputSchema: {
       type: 'object',
       required: ['reviewer', 'mode', 'question', 'instructions', 'artifact'],
@@ -519,25 +552,27 @@ export const register: Register = on => {
       if (/[\0\uFFFD]/.test(content)) return { deny: `${file} contains NUL or U+FFFD characters, as a file that is not UTF-8 text reads, so it cannot go into Gemini's prompt.` }
       texts.push(snapshot(file, content))
     }
-    const run = await startRun($, {
+    // Where nothing draws (a -p run, an SDK host) the session ends with the run, so the call
+    // waits for it; elsewhere it returns the run at once and the plugin announces its end.
+    const isBackground = (await $.session.surfaces()).length > 0
+    const { run: started, settled } = await startRun($, {
       reviewer: input.reviewer, mode: input.mode, question: input.question, instructions: input.instructions,
       text: texts.length > 0 ? texts.join('\n\n') : null, files, effort, model, exe,
     }, gen, next.signal)
+    const run = isBackground ? started : await settled
     if (run.id === '' || gen !== generation) return { deny: ENDED }
     if (run.status === 'failed') return { deny: `${run.id}: ${run.failure}` }
-    const done = (await read($, runs)).find(r => r.id === run.id) ?? run
-    return { result: JSON.stringify({ ...done, durationMs: (done.endedAt ?? (await $.clock.now())) - done.startedAt }, null, 2) }
+    const result = await asResult($, (await read($, runs)).find(r => r.id === run.id) ?? run)
+    // Started last: a message sent while this call still held the turn would be refused.
+    if (isBackground) void announce($, settled, gen)
+    return result
   })
 
   on('tool.call', { tool: T('review_results') }, async ($, e) => {
     const { runId } = e as unknown as { runId: string }
     const run = (await read($, runs)).find(r => r.id === runId)
     if (!run) return { deny: `There is no run ${runId} in this conversation.` }
-    const now = await $.clock.now()
-    const extra = run.status === 'running'
-      ? { elapsedMs: now - run.startedAt, activity: progress.get(runId)?.activity ?? 'starting' }
-      : { durationMs: (run.endedAt ?? now) - run.startedAt }
-    return { result: JSON.stringify({ ...run, ...extra }, null, 2) }
+    return asResult($, run)
   })
 
   on('tool.call', { tool: T('review_record') }, async ($, e) => {
