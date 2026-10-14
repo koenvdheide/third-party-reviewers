@@ -149,12 +149,7 @@ async function change($: Engine, fn: (list: Run[]) => Run[], gen = generation): 
     if (gen !== generation) return
     try {
       await $.store.set(savedKey(id), { savedAt: await $.clock.now(), runs: list })
-      // Compared with the stored counts, so every save repairs any count of this conversation
-      // that a failed write or a race left missing or stale.
-      for (const r of list) {
-        const count = countOf(r)
-        if (JSON.stringify(await $.store.get(countKey(id, r.id))) !== JSON.stringify(count)) await $.store.set(countKey(id, r.id), count)
-      }
+      await syncCounts($, id, list)
     } catch (err) {
       $.ui.toast(`Could not save the reviews for resuming this conversation: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -171,15 +166,19 @@ async function restore($: Engine, sessionId: string): Promise<void> {
   await markOrphans($)
 }
 
-// Gives every stored run without a count one, so history saved before counts existed is
-// counted before pruning drops its ledger.
+// Rewrites each run's count that differs from its ledger, so a count a failed write or a race
+// left missing or stale is repaired. The ledger is written first, so it is never the older.
+async function syncCounts($: Engine, sessionId: string, list: readonly Run[]): Promise<void> {
+  for (const r of list) {
+    const count = countOf(r)
+    if (JSON.stringify(await $.store.get(countKey(sessionId, r.id))) !== JSON.stringify(count)) await $.store.set(countKey(sessionId, r.id), count)
+  }
+}
+
+// Syncs every stored ledger's counts, so none goes stale or missing before pruning drops it.
 async function countStored($: Engine): Promise<void> {
-  const keys = await $.store.keys()
-  for (const key of keys.filter(k => k.startsWith('runs:'))) {
-    const sessionId = key.slice('runs:'.length)
-    for (const r of ((await $.store.get(key)) as Saved).runs) {
-      if (!keys.includes(countKey(sessionId, r.id))) await $.store.set(countKey(sessionId, r.id), countOf(r))
-    }
+  for (const key of (await $.store.keys()).filter(k => k.startsWith('runs:'))) {
+    await syncCounts($, key.slice('runs:'.length), ((await $.store.get(key)) as Saved).runs)
   }
 }
 
