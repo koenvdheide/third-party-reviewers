@@ -5,7 +5,7 @@ import type { Finding, FindingStatus, Reviewer, Run } from '../types'
 import { AGY_AGENT_FILE, AGY_AGENT_TEXT, CODEX_MODEL, EFFORTS, Lines, NAME, SAFE_ID, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash, snapshot } from './cli'
 import type { Exe, Outcome, Parser, RawFinding } from './cli'
 import { STATUSES, applyOverrule, applyRecord, citationOf, findingOf, outcome, overrulePrompt, tallyOf } from './findings'
-import type { RecordResult, Tally } from './findings'
+import type { RecordResult } from './findings'
 import { PANE, paneTree } from './pane'
 
 // Everything that calls the engine lives in this file: the mod loader follows `$` only into
@@ -33,9 +33,14 @@ const picker = atom({ plugin: 'third-party-reviewers', key: 'picker' } as const,
 // process; a resumed conversation finds it there.
 type Saved = { savedAt: number; runs: Run[] }
 const savedKey = (sessionId: string) => `runs:${sessionId}`
-// The finding counts of every review this store has seen, kept as a running total so that
-// pruning a conversation's ledger leaves them alone.
-const LIFETIME = 'lifetime'
+// Each run's finding counts, [total, applied, rejected], kept past pruning; the global count is
+// their sum. Each key has one writer, the run's conversation, and takes a whole value, so no
+// two sessions add to one number. A run id is unique only within its ledger, hence the session.
+const countKey = (sessionId: string, runId: string) => `count:${sessionId}/${runId}`
+const countOf = (r: Run) => {
+  const t = tallyOf([r])
+  return [t.total, t.applied, t.rejected]
+}
 // Half the store's 4 MiB, so the conversation in progress has room to grow.
 const STORE_BUDGET = 2 * 1024 * 1024
 let saving: Promise<void> = Promise.resolve()
@@ -142,15 +147,17 @@ async function change($: Engine, fn: (list: Run[]) => Run[], gen = generation): 
     const id = await $.session.id()
     const list = await update($, runs, current => (gen === generation ? fn(current) : current))
     if (gen !== generation) return
-    const stored = (await $.store.get(savedKey(id))) as Saved | undefined
     try {
       await $.store.set(savedKey(id), { savedAt: await $.clock.now(), runs: list })
+      // Compared with the stored counts, so every save repairs any count of this conversation
+      // that a failed write or a race left missing or stale.
+      for (const r of list) {
+        const count = countOf(r)
+        if (JSON.stringify(await $.store.get(countKey(id, r.id))) !== JSON.stringify(count)) await $.store.set(countKey(id, r.id), count)
+      }
     } catch (err) {
       $.ui.toast(`Could not save the reviews for resuming this conversation: ${err instanceof Error ? err.message : String(err)}`)
-      return
     }
-    // Counted against the stored ledger, so a change whose save failed counts with the next save.
-    await count($, stored?.runs ?? [], list).catch((err: unknown) => $.ui.toast(`Could not update the lifetime finding count: ${err instanceof Error ? err.message : String(err)}`))
   })
   saving = turn.catch(() => undefined)
   await turn
@@ -164,18 +171,16 @@ async function restore($: Engine, sessionId: string): Promise<void> {
   await markOrphans($)
 }
 
-async function count($: Engine, before: readonly Run[], after: readonly Run[]): Promise<void> {
-  const [b, a] = [tallyOf(before), tallyOf(after)]
-  if (a.total === b.total && a.applied === b.applied && a.rejected === b.rejected) return
-  const t = (await $.store.get(LIFETIME)) as Tally
-  await $.store.set(LIFETIME, { total: t.total + a.total - b.total, applied: t.applied + a.applied - b.applied, rejected: t.rejected + a.rejected - b.rejected })
-}
-
-// The running total's starting value, from every ledger the store holds; null once it exists.
-async function lifetimeSeed($: Engine): Promise<Tally | null> {
-  if ((await $.store.get(LIFETIME)) !== undefined) return null
-  const ledgers = await Promise.all((await $.store.keys()).filter(k => k.startsWith('runs:')).map(async k => (await $.store.get(k)) as Saved))
-  return tallyOf(ledgers.flatMap(s => s.runs))
+// Gives every stored run without a count one, so history saved before counts existed is
+// counted before pruning drops its ledger.
+async function countStored($: Engine): Promise<void> {
+  const keys = await $.store.keys()
+  for (const key of keys.filter(k => k.startsWith('runs:'))) {
+    const sessionId = key.slice('runs:'.length)
+    for (const r of ((await $.store.get(key)) as Saved).runs) {
+      if (!keys.includes(countKey(sessionId, r.id))) await $.store.set(countKey(sessionId, r.id), countOf(r))
+    }
+  }
 }
 
 // Drops the least recently saved conversations past the budget; the current one stays.
@@ -454,10 +459,15 @@ export const register: Register = on => {
     installed = null
     await markOrphans($)
     await registerTools($, await ensure($))
-    // Counted before pruning drops ledgers, written after it frees the room.
-    const seed = await lifetimeSeed($)
-    await prune($)
-    if (seed !== null) await $.store.set(LIFETIME, seed)
+    // Pruning waits for the counts, so no ledger goes before its runs are counted.
+    const counted = await countStored($).then(
+      () => true,
+      (err: unknown) => {
+        $.ui.toast(`Could not count earlier reviews, so none were trimmed from the store: ${err instanceof Error ? err.message : String(err)}`)
+        return false
+      },
+    )
+    if (counted) await prune($)
     return started
   })
 

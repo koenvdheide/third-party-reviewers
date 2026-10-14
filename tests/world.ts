@@ -7,7 +7,7 @@ const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isSt
 
 export const CODEX_EXE = 'C:/u/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
 
-export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean; storeCap?: number } = {}) {
+export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean | string; storeCap?: number } = {}) {
   const clock = mock.clock(on)
   mock.env(on, { OS: 'Windows_NT', TEMP: 'C:/tmp/tpr' })
   const files = new Map<string, string>([[CODEX_EXE, '']])
@@ -81,7 +81,8 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   on('store.get', ($, e) => ({ value: store.get(e.key) }))
   on('store.set', async ($, e) => {
     if (w.holdStore) await new Promise<void>(resolve => w.heldStore.push(resolve))
-    if (opts.failStore) return { deny: 'EACCES: the store is not writable' }
+    // A string fails only the keys it prefixes.
+    if (opts.failStore === true || (typeof opts.failStore === 'string' && e.key.startsWith(opts.failStore))) return { deny: 'EACCES: the store is not writable' }
     if (opts.storeCap !== undefined && JSON.stringify(Object.fromEntries(new Map(store).set(e.key, e.value))).length > opts.storeCap) return { deny: 'the store would exceed its cap' }
     store.set(e.key, JSON.parse(JSON.stringify(e.value)))
     return { value: undefined }
