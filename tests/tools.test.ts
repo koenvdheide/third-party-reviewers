@@ -234,6 +234,7 @@ describe('runs', () => {
 describe('records', () => {
   test('concurrent records both land; unknown and bad status refused', async ($, on) => {
     const w = world(on)
+    w.store.set('lifetime', { total: 5, applied: 2, rejected: 1 })
     w.scripts.push({ lines: codexReview([finding({}), finding({ title: 'second' })]) })
     await boot($, w)
     const id = await startOf($)
@@ -242,6 +243,7 @@ describe('records', () => {
       call($, 'review_record', { findingId: `${id}.2`, status: 'rejected', evidence: 'contradicted' }),
     ])
     expect((await resultOf($, id)).findings.map((f: any) => [f.status, f.evidence])).toEqual([['applied', 'fixed'], ['rejected', 'contradicted']])
+    expect(w.store.get('lifetime')).toEqual({ total: 7, applied: 3, rejected: 2 })
     expect((await call($, 'review_record', { findingId: 'r-00000000.1', status: 'applied', evidence: 'x' })).deny).toContain('no finding')
     expect((await call($, 'review_record', { findingId: `${id}.1`, status: 'done', evidence: 'x' })).deny).toContain('one of')
   })
@@ -367,27 +369,38 @@ describe('resume', () => {
     const w = world(on)
     const MiB = 1024 * 1024
     // Two UTF-8 bytes a character, so a budget counted in characters would keep them all.
-    const saved = (savedAt: number, size: number) => ({ savedAt, runs: [{ id: `r-${savedAt}`, response: 'é'.repeat(size / 2), findings: [{ status: 'applied', overrule: null }, { status: 'applied', overrule: 'reject' }] }] })
+    const saved = (savedAt: number, size: number) => ({ savedAt, runs: [{ id: 'r', response: 'é'.repeat(size / 2), findings: [{ status: 'applied', overrule: null }, { status: 'applied', overrule: 'reject' }] }] })
     w.store.set('runs:s1', saved(0, 0.5 * MiB))
     w.store.set('runs:new', saved(3, 0.5 * MiB))
     w.store.set('runs:mid', saved(2, 0.5 * MiB))
     w.store.set('runs:old', saved(1, 0.75 * MiB))
-    // An earlier pruning of the same conversation, before it was resumed.
-    w.store.set('tally:old', { 'r-0': { total: 3, applied: 0, rejected: 3 } })
     await boot($, w)
-    expect([...w.store.keys()].sort()).toEqual(['runs:mid', 'runs:new', 'runs:s1', 'tally:old'])
-    expect(w.store.get('tally:old')).toEqual({ 'r-0': { total: 3, applied: 0, rejected: 3 }, 'r-1': { total: 2, applied: 1, rejected: 1 } })
+    expect([...w.store.keys()].sort()).toEqual(['lifetime', 'runs:mid', 'runs:new', 'runs:s1'])
+    // Seeded from all four ledgers before the oldest was pruned.
+    expect(w.store.get('lifetime')).toEqual({ total: 8, applied: 4, rejected: 4 })
   })
 
-  test('a store at its cap still prunes, keeping the counts', async ($, on) => {
+  test('a change whose save failed is counted with the next save', async ($, on) => {
+    const opts = { failStore: false }
+    const w = world(on, opts)
+    w.scripts.push({ lines: codexReview([finding({}), finding({ title: 'second' })]) })
+    await boot($, w)
+    opts.failStore = true
+    const id = await startOf($)
+    opts.failStore = false
+    await call($, 'review_record', { findingId: `${id}.1`, status: 'applied', evidence: 'fixed' })
+    expect(w.store.get('lifetime')).toEqual({ total: 2, applied: 1, rejected: 0 })
+  })
+
+  test('a store at its cap still gets its first lifetime count, after pruning', async ($, on) => {
     const MiB = 1024 * 1024
     const saved = (savedAt: number, size: number) => ({ savedAt, runs: [{ id: `r-${savedAt}`, response: 'x'.repeat(size), findings: [{ status: 'rejected', overrule: null }] }] })
     const seeded = { 'runs:new': saved(3, 1.5 * MiB), 'runs:old': saved(1, 0.75 * MiB) }
     const w = world(on, { storeCap: JSON.stringify(seeded).length })
     for (const [k, v] of Object.entries(seeded)) w.store.set(k, v)
     await boot($, w)
-    expect([...w.store.keys()].sort()).toEqual(['runs:new', 'tally:old'])
-    expect(w.store.get('tally:old')).toEqual({ 'r-1': { total: 1, applied: 0, rejected: 1 } })
+    expect([...w.store.keys()].sort()).toEqual(['lifetime', 'runs:new'])
+    expect(w.store.get('lifetime')).toEqual({ total: 2, applied: 0, rejected: 2 })
   })
 
   test('a failed save is named in a toast and the review still returns', async ($, on) => {
