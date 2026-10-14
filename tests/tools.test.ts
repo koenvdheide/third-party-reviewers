@@ -234,7 +234,6 @@ describe('runs', () => {
 describe('records', () => {
   test('concurrent records both land; unknown and bad status refused', async ($, on) => {
     const w = world(on)
-    w.store.set('lifetime', { total: 5, applied: 2, rejected: 1 })
     w.scripts.push({ lines: codexReview([finding({}), finding({ title: 'second' })]) })
     await boot($, w)
     const id = await startOf($)
@@ -243,7 +242,7 @@ describe('records', () => {
       call($, 'review_record', { findingId: `${id}.2`, status: 'rejected', evidence: 'contradicted' }),
     ])
     expect((await resultOf($, id)).findings.map((f: any) => [f.status, f.evidence])).toEqual([['applied', 'fixed'], ['rejected', 'contradicted']])
-    expect(w.store.get('lifetime')).toEqual({ total: 7, applied: 3, rejected: 2 })
+    expect(w.store.get(`count:s1/${id}`)).toEqual([2, 1, 1])
     expect((await call($, 'review_record', { findingId: 'r-00000000.1', status: 'applied', evidence: 'x' })).deny).toContain('no finding')
     expect((await call($, 'review_record', { findingId: `${id}.1`, status: 'done', evidence: 'x' })).deny).toContain('one of')
   })
@@ -375,32 +374,44 @@ describe('resume', () => {
     w.store.set('runs:mid', saved(2, 0.5 * MiB))
     w.store.set('runs:old', saved(1, 0.75 * MiB))
     await boot($, w)
-    expect([...w.store.keys()].sort()).toEqual(['lifetime', 'runs:mid', 'runs:new', 'runs:s1'])
-    // Seeded from all four ledgers before the oldest was pruned.
-    expect(w.store.get('lifetime')).toEqual({ total: 8, applied: 4, rejected: 4 })
+    // Every ledger's runs are counted before the oldest ledger is pruned.
+    expect([...w.store.keys()].sort()).toEqual(['count:mid/r', 'count:new/r', 'count:old/r', 'count:s1/r', 'runs:mid', 'runs:new', 'runs:s1'])
+    expect(w.store.get('count:old/r')).toEqual([2, 1, 1])
   })
 
-  test('a change whose save failed is counted with the next save', async ($, on) => {
-    const opts = { failStore: false }
+  test('a count whose write failed is written by the next save', async ($, on) => {
+    const opts: { failStore: boolean | string } = { failStore: false }
     const w = world(on, opts)
-    w.scripts.push({ lines: codexReview([finding({}), finding({ title: 'second' })]) })
+    w.scripts.push({ lines: codexReview([finding({}), finding({ title: 'second' })]) }, { lines: codexReview([]) })
     await boot($, w)
-    opts.failStore = true
     const id = await startOf($)
-    opts.failStore = false
+    opts.failStore = 'count:'
     await call($, 'review_record', { findingId: `${id}.1`, status: 'applied', evidence: 'fixed' })
-    expect(w.store.get('lifetime')).toEqual({ total: 2, applied: 1, rejected: 0 })
+    opts.failStore = false
+    // A save that leaves the first run as it was.
+    await startOf($)
+    expect(w.store.get(`count:s1/${id}`)).toEqual([2, 1, 0])
   })
 
-  test('a store at its cap still gets its first lifetime count, after pruning', async ($, on) => {
+  test('any save repairs a stale count of its conversation', async ($, on) => {
+    const w = world(on)
+    w.scripts.push({ lines: codexReview([finding({})]) }, { lines: codexReview([]) })
+    await boot($, w)
+    const id = await startOf($)
+    w.store.set(`count:s1/${id}`, [9, 9, 9])
+    await startOf($)
+    expect(w.store.get(`count:s1/${id}`)).toEqual([1, 0, 0])
+  })
+
+  test('a ledger whose runs cannot be counted is not pruned', async ($, on) => {
     const MiB = 1024 * 1024
     const saved = (savedAt: number, size: number) => ({ savedAt, runs: [{ id: `r-${savedAt}`, response: 'x'.repeat(size), findings: [{ status: 'rejected', overrule: null }] }] })
     const seeded = { 'runs:new': saved(3, 1.5 * MiB), 'runs:old': saved(1, 0.75 * MiB) }
     const w = world(on, { storeCap: JSON.stringify(seeded).length })
     for (const [k, v] of Object.entries(seeded)) w.store.set(k, v)
     await boot($, w)
-    expect([...w.store.keys()].sort()).toEqual(['lifetime', 'runs:new'])
-    expect(w.store.get('lifetime')).toEqual({ total: 2, applied: 0, rejected: 2 })
+    expect([...w.store.keys()].sort()).toEqual(['runs:new', 'runs:old'])
+    expect(w.toasts.some(t => t.includes('Could not count earlier reviews'))).toBe(true)
   })
 
   test('a failed save is named in a toast and the review still returns', async ($, on) => {
