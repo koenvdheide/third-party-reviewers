@@ -56,7 +56,7 @@ The plugin is a mod, code that Claude Code runs. It has no server and makes no n
 ### Files it writes
 
 - `.agents/agents/tpr-reviewer.md` in a Gemini review's temporary directory, `third-party-reviewers/<run id>/` under `TEMP`, `TMPDIR` or `/tmp`. It is the agent definition `agy` loads, which gives the reviewer tools to read and search files, fetch URLs and return its answer, and none that write. The plugin deletes the directory when the review ends, and shows its path if that fails.
-- Each conversation's reviews and decisions, in Claude Code's plugin store, so a resumed conversation has them again. Trimming the store drops old conversations' reviews but keeps how many findings each review had, and how many were applied and rejected, under `tally:<session id>`.
+- Each conversation's reviews and decisions, in Claude Code's plugin store, so a resumed conversation has them again. A running total of findings across all conversations, and how many were applied and rejected, is kept under `lifetime` and survives the store's trimming.
 
 It writes no other file, and none of your build, settings or instructions files.
 
