@@ -269,6 +269,25 @@ describe('background', () => {
     expect((w.origins[0] as { asUser?: boolean }).asUser).toBe(undefined)
   })
 
+  for (const { name, env, answer } of [
+    { name: 'in the desktop app the call returns the run at once', env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, answer: 'running' },
+    { name: 'in its third-party-provider build too', env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop-3p' }, answer: 'running' },
+    { name: 'a claude -p a desktop shell or hook started waits', env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDE_CODE_CHILD_SESSION: '1' }, answer: 'waiting' },
+    { name: 'a claude -p a desktop MCP server started waits', env: { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', CLAUDECODE: '1' }, answer: 'waiting' },
+  ]) {
+    test(`with no surface, ${name}`, async ($, on) => {
+      const w = world(on, { env })
+      w.scripts.push({ silent: true, lines: codexReview([]) })
+      await boot($, w)
+      const pending = call($, 'review_start', start)
+      const early = await answerOf(w, pending)
+      w.waiting.shift()?.()
+      await pending
+      await w.clock.settle()
+      expect(early === undefined ? 'waiting' : JSON.parse(early.result).status).toBe(answer)
+    })
+  }
+
   test('with no surface the call waits for the review and nothing is submitted', async ($, on) => {
     const w = world(on)
     w.scripts.push({ lines: codexReview([finding({})]) })

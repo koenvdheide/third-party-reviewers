@@ -25,7 +25,7 @@ Call `review_start` using the selected entry skill's provider and operational in
 
 The tool's [prompt builder](../hooks/cli.ts) owns data-only framing, the ownership checklist, the simplicity bar and the structured output contract. It adds them to each prompt, omitting the ownership checklist for `explain` and limiting ownership and simplicity findings to evidenced failures for `breakage-review`. Keep those instructions in the runtime; pass the mode instructions and task context here.
 
-`review_start` returns the run while the reviewer works, and the plugin sends a message naming the run once the review ends. Meanwhile, end the turn or carry on with other work that leaves the reviewed files unchanged. Where nothing draws, as in a `-p` run, `review_start` waits and returns the result itself. The message reaches the main conversation only: a subagent or teammate that starts a review hands the run id and what the review is for back to its parent and stops, and the main conversation reads the result and owns the dispositions and any further round.
+`review_start` returns the run while the reviewer works, and the plugin sends a message naming the run once the review ends. Meanwhile, end the turn or carry on with other work that leaves the reviewed files unchanged. Where nothing draws, as in a `-p` run, `review_start` waits and returns the result itself; a desktop app session gets the run at once. The message reaches the main conversation only: a subagent or teammate that starts a review hands the run id and what the review is for back to its parent and stops, and the main conversation reads the result and owns the dispositions and any further round.
 
 ## Mode catalogue
 
