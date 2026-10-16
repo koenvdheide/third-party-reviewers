@@ -134,10 +134,10 @@ describe('pane', () => {
     test(`shows Claude's judgement, takes the user's overrule, and asks, on ${surface}`, async ($, on) => {
       const w = world(on)
       beneath(on)
-      w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
+      w.files.set(`${w.work}/a.ts`, 'one\nfunction add() {}\n')
       w.scripts.push({ lines: codexReview })
       await boot($, w)
-      const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).id
+      const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: [`${w.work}/a.ts`] } })).result).id
       const band = await $.ui.mount({ plugin: 'third-party-reviewers', surface, component: 'AbovePrompt', props: { hasSurvey: false } } as any)
       expect(JSON.stringify(await band.drawn())).toContain('findings (1 open)')
       await band.press({ key: 'findings' })
@@ -168,10 +168,10 @@ describe('pane', () => {
 
   test('a refused instruction stores no overrule', async ($, on) => {
     const w = world(on, { dropPrompts: true })
-    w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
+    w.files.set(`${w.work}/a.ts`, 'one\nfunction add() {}\n')
     w.scripts.push({ lines: codexReview })
     await boot($, w)
-    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).id
+    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: [`${w.work}/a.ts`] } })).result).id
     const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'Pane', requestId: PANE, props: props('terminal') } as any)
     await view.press({ key: `pick|${runId}.1` })
     await view.unmount()
@@ -183,10 +183,10 @@ describe('pane', () => {
 
   test('the stored overrule is the last instruction Claude accepted', async ($, on) => {
     const w = world(on, { holdPrompts: true })
-    w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
+    w.files.set(`${w.work}/a.ts`, 'one\nfunction add() {}\n')
     w.scripts.push({ lines: codexReview })
     await boot($, w)
-    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).id
+    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: [`${w.work}/a.ts`] } })).result).id
     // The world answers state itself, so each step mounts afresh to see the new buttons.
     const press = async (key: string) => {
       const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'Pane', requestId: PANE, props: props('terminal') } as any)
@@ -212,10 +212,10 @@ describe('pane', () => {
 
   test('a later accepted instruction is written after an earlier one, in state and store', async ($, on) => {
     const w = world(on, { holdPrompts: true })
-    w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
+    w.files.set(`${w.work}/a.ts`, 'one\nfunction add() {}\n')
     w.scripts.push({ lines: codexReview })
     await boot($, w)
-    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: ['C:/work/a.ts'] } })).result).id
+    const runId = JSON.parse((await call($, 'review_start', { reviewer: 'codex', mode: 'red-team', question: 'Q', instructions: 'I', artifact: { files: [`${w.work}/a.ts`] } })).result).id
     const press = async (key: string) => {
       const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'Pane', requestId: PANE, props: props('terminal') } as any)
       const pressed = view.press({ key })

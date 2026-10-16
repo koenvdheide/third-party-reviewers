@@ -5,16 +5,21 @@ export type Script = { lines?: unknown[]; stderr?: string[]; exit?: number; sile
 
 const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
 
-export const CODEX_EXE = 'C:/u/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
+const WINDOWS_CODEX_EXE = '/u/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
 
-export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; failPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean | string; storeCap?: number } = {}) {
+export function world(on: On, opts: { windows?: boolean; codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; failPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean | string; storeCap?: number } = {}) {
   const clock = mock.clock(on)
-  mock.env(on, { OS: 'Windows_NT', TEMP: 'C:/tmp/tpr' })
-  const files = new Map<string, string>([[CODEX_EXE, '']])
+  const work = '/work'
+  const temp = '/tmp/tpr'
+  const windows = opts.windows ?? opts.nativeCodex !== undefined
+  mock.env(on, { OS: windows ? 'Windows_NT' : 'Linux', TEMP: temp })
+  const files = new Map<string, string>([[WINDOWS_CODEX_EXE, '']])
   const state = new Map<string, { value: unknown; version: number }>()
   const store = new Map<string, unknown>()
   const w = {
-    clock, files, store,
+    clock, files, store, work, temp,
+    unreadable: new Set<string>(),
+    codexExe: windows ? WINDOWS_CODEX_EXE : 'codex',
     sessionId: 's1',
     // With holdRead on, each file read waits here until the test releases it.
     holdRead: false,
@@ -51,10 +56,12 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   const gemini = opts.gemini ?? true
 
   // The engine hands fs hooks the platform's own path form.
-  const key = (path: string) => path.replaceAll('\\', '/')
+  // A root-relative fixture is on the current drive on Windows. Hide that drive
+  // at the mock boundary so both hosts address the same in-memory files.
+  const key = (path: string) => path.replaceAll('\\', '/').replace(/^[A-Za-z]:/, '')
   // The engine rejects a network location, as the real one does.
   const inDir = (dir: string) => [...files.keys()].filter(f => f.startsWith(`${dir}/`))
-  on('fs.exists', ($, e) => (key(e.path).startsWith('//') ? { deny: `network location: ${e.path}` } : { value: files.has(key(e.path)) || inDir(key(e.path)).length > 0 }))
+  on('fs.exists', ($, e) => ((key(e.path).startsWith('//') || w.unreadable.has(key(e.path))) ? { deny: `cannot access: ${e.path}` } : { value: files.has(key(e.path)) || inDir(key(e.path)).length > 0 }))
   on('fs.read', async ($, e) => {
     if (w.holdRead) await new Promise<void>(resolve => w.heldRead.push(resolve))
     return files.has(key(e.path)) ? { value: files.get(key(e.path)) as string } : { deny: `ENOENT: ${e.path}` }
@@ -105,9 +112,9 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
   on('session.id', () => ({ value: w.sessionId }))
   on('session.cwd', async () => {
     if (opts.slowSetup) await clock.sleep(100)
-    return { value: 'C:/work' }
+    return { value: work }
   })
-  on('session.repo', () => ({ value: { root: 'C:/work', remote: null, internal: false, name: null } }))
+  on('session.repo', () => ({ value: { root: work, remote: null, internal: false, name: null } }))
   on('session.surfaces', () => ({ value: w.surfaces }))
   on('ui.toast', ($, e) => {
     w.toasts.push(e.text)
@@ -119,25 +126,26 @@ export function world(on: On, opts: { codex?: boolean; nativeCodex?: string; gem
     const cmd = e.argv.join(' ')
     if (cmd === 'where.exe codex') {
       if (!codex) return { value: { exitCode: 1, stdout: '', stderr: 'not found', isStdoutTruncated: false, isStderrTruncated: false } }
-      return ok(opts.nativeCodex ? `${opts.nativeCodex}\r\n` : 'C:\\u\\npm\\codex\r\nC:\\u\\npm\\codex.cmd\r\n')
+      return ok(opts.nativeCodex ? `${opts.nativeCodex}\r\n` : '/u/npm/codex\r\n/u/npm/codex.cmd\r\n')
     }
-    if (cmd === `${opts.nativeCodex?.replaceAll('\\', '/') ?? CODEX_EXE} --version`) {
+    if (cmd === `${opts.nativeCodex?.replaceAll('\\', '/') ?? (windows ? WINDOWS_CODEX_EXE : 'codex')} --version`) {
+      if (!codex) return { deny: 'ENOENT: codex' }
       if (opts.slowResolve) await clock.sleep(100)
       return ok('codex-cli 0.159.3')
     }
     if (cmd === 'agy models' && opts.catalogueError) return { value: { exitCode: 1, stdout: '', stderr: opts.catalogueError, isStdoutTruncated: false, isStderrTruncated: false } }
     if (cmd === 'agy models') return gemini ? ok('gemini-3.8-flash-high\tGemini 3.8 Flash (High)') : { deny: 'ENOENT: agy' }
-    if (e.argv[0] === 'powershell.exe') {
-      const dir = e.init?.env?.TPR_DIR ?? ''
-      w.removed.push(dir)
+    if (e.argv[0] === 'powershell.exe' || e.argv[0] === 'rm') {
+      const dir = e.argv[0] === 'rm' ? e.argv[3] : e.init?.env?.TPR_DIR ?? ''
+      w.removed.push(key(dir))
       if (opts.failRemove) return { value: { exitCode: 1, stdout: '', stderr: 'in use', isStdoutTruncated: false, isStderrTruncated: false } }
-      inDir(dir).forEach(f => files.delete(f))
+      inDir(key(dir)).forEach(f => files.delete(f))
       return ok('')
     }
     return { deny: `not installed: ${cmd}` }
   })
   on('process.spawn', async function* ($, e, next) {
-    w.spawns.push({ argv: e.argv, cwd: e.cwd, input: e.input })
+    w.spawns.push({ argv: e.argv, cwd: e.cwd === undefined ? undefined : key(e.cwd), input: e.input })
     const s = w.scripts.shift() ?? {}
     // A silent child writes nothing until it is killed, which aborts this dispatch, or the test lets it go.
     if (s.silent) await new Promise<void>(resolve => {
@@ -174,7 +182,7 @@ export const call = ($: any, name: string, args: Record<string, unknown>) =>
   $.tool.call({ tool: T(name), tool_use_id: `tu${(calls += 1)}`, ...args })
 
 export async function boot($: any, w: ReturnType<typeof world>) {
-  await $.session.start({ cwd: 'C:/work', surface: null, isInteractive: true })
+  await $.session.start({ cwd: w.work, surface: null, isInteractive: true })
   await w.clock.settle()
 }
 

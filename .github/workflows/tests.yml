@@ -10,8 +10,12 @@ permissions:
 
 jobs:
   test:
-    # The existing fixtures use Windows paths; the engine resolves paths for its host OS.
-    runs-on: windows-2025
+    name: Mod tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
