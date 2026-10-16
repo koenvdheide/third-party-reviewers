@@ -46,7 +46,7 @@ describe('runs', () => {
   for (const { name, reviewer, script, failure } of [
     { name: 'codex preserves process-start errors', reviewer: 'codex', script: { error: 'EACCES: reviewer executable' }, failure: ['EACCES: reviewer executable'] },
     { name: 'gemini preserves process-start errors', reviewer: 'gemini', script: { error: 'EACCES: reviewer executable' }, failure: ['EACCES: reviewer executable'] },
-    { name: 'a failed Gemini stream keeps both its error and prior stderr', reviewer: 'gemini', script: { stderr: ['notice: view_file C:/x.ts denied'], error: 'EPIPE: reviewer stream' }, failure: ['EPIPE: reviewer stream', 'view_file C:/x.ts denied'] },
+    { name: 'a failed Gemini stream keeps both its error and prior stderr', reviewer: 'gemini', script: { stderr: ['notice: view_file /x.ts denied'], error: 'EPIPE: reviewer stream' }, failure: ['EPIPE: reviewer stream', 'view_file /x.ts denied'] },
   ]) {
     test(name, async ($, on) => {
       const w = world(on)
@@ -165,11 +165,11 @@ describe('runs', () => {
 
   test('agy stderr reaches the result: kept on success, the reason on failure', async ($, on) => {
     const w = world(on)
-    w.scripts.push({ stderr: ['notice: view_file C:/x.ts denied'], lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
+    w.scripts.push({ stderr: ['notice: view_file /x.ts denied'], lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
     w.scripts.push({ stderr: ['error: bad agent'], exit: 3 })
     await boot($, w)
     const ok = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
-    expect(ok.stderr).toBe('notice: view_file C:/x.ts denied')
+    expect(ok.stderr).toBe('notice: view_file /x.ts denied')
     expect(ok.deniedSteps).toEqual([])
     const bad = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
     expect(bad.status).toBe('failed')
