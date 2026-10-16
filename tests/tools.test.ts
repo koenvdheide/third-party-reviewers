@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { CODEX_EXE, boot, call, endSession, world } from './world'
+import { boot, call, endSession, world } from './world'
 
 const finding = (o: Record<string, unknown>) => ({ severity: 'breakage', title: 'op', claim: 'c', file: null, line: null, symbol: null, ...o })
 const codexReview = (findings: unknown[]) => [
@@ -13,22 +13,25 @@ const startOf = async ($: any, args: Record<string, unknown> = start) => JSON.pa
 const resultOf = async ($: any, runId: string) => JSON.parse((await call($, 'review_results', { runId })).result)
 
 describe('runs', () => {
-  test('clean codex run: native binary, returned complete, nothing submitted', async ($, on) => {
-    const w = world(on)
-    w.files.set('C:/work/a.ts', 'x')
-    w.scripts.push({ lines: codexReview([finding({ file: 'a.ts', line: 2, symbol: 'add' }), finding({ severity: 'other' }), finding({ file: '//server/share/a.ts', line: 1, symbol: null })]) })
-    await boot($, w)
-    const r = JSON.parse((await call($, 'review_start', { ...start, artifact: { files: ['C:/work/a.ts'] } })).result)
-    const id = r.id
-    expect(id).toMatch(/^r-[0-9a-f]{8}$/)
-    expect(r.status).toBe('complete')
-    expect(r.findings.map((f: any) => f.id)).toEqual([`${id}.1`, `${id}.2`, `${id}.3`])
-    expect(r.findings.map((f: any) => f.citation)).toEqual(['line-out-of-range', 'no-location', 'not-checked'])
-    expect(typeof r.durationMs).toBe('number')
-    expect(w.spawns[0]?.argv[0]).toBe(CODEX_EXE)
-    expect(w.spawns[0]?.cwd).toBe('C:/work')
-    expect(w.submitted).toEqual([])
-  })
+  for (const windows of [false, true]) {
+    test(`clean codex run (${windows ? 'Windows' : 'POSIX'}): returned complete, nothing submitted`, async ($, on) => {
+      const w = world(on, { windows })
+      w.unreadable.add('/restricted/a.ts')
+      w.files.set(`${w.work}/a.ts`, 'x')
+      w.scripts.push({ lines: codexReview([finding({ file: 'a.ts', line: 2, symbol: 'add' }), finding({ severity: 'other' }), finding({ file: '/restricted/a.ts', line: 1, symbol: null })]) })
+      await boot($, w)
+      const r = JSON.parse((await call($, 'review_start', { ...start, artifact: { files: [`${w.work}/a.ts`] } })).result)
+      const id = r.id
+      expect(id).toMatch(/^r-[0-9a-f]{8}$/)
+      expect(r.status).toBe('complete')
+      expect(r.findings.map((f: any) => f.id)).toEqual([`${id}.1`, `${id}.2`, `${id}.3`])
+      expect(r.findings.map((f: any) => f.citation)).toEqual(['line-out-of-range', 'no-location', 'not-checked'])
+      expect(typeof r.durationMs).toBe('number')
+      expect(w.spawns[0]?.argv[0]).toBe(w.codexExe)
+      expect(w.spawns[0]?.cwd).toBe(w.work)
+      expect(w.submitted).toEqual([])
+    })
+  }
 
   test('non-zero exit returns a failed run', async ($, on) => {
     const w = world(on)
@@ -43,7 +46,7 @@ describe('runs', () => {
   for (const { name, reviewer, script, failure } of [
     { name: 'codex preserves process-start errors', reviewer: 'codex', script: { error: 'EACCES: reviewer executable' }, failure: ['EACCES: reviewer executable'] },
     { name: 'gemini preserves process-start errors', reviewer: 'gemini', script: { error: 'EACCES: reviewer executable' }, failure: ['EACCES: reviewer executable'] },
-    { name: 'a failed Gemini stream keeps both its error and prior stderr', reviewer: 'gemini', script: { stderr: ['notice: view_file C:/x.ts denied'], error: 'EPIPE: reviewer stream' }, failure: ['EPIPE: reviewer stream', 'view_file C:/x.ts denied'] },
+    { name: 'a failed Gemini stream keeps both its error and prior stderr', reviewer: 'gemini', script: { stderr: ['notice: view_file /x.ts denied'], error: 'EPIPE: reviewer stream' }, failure: ['EPIPE: reviewer stream', 'view_file /x.ts denied'] },
   ]) {
     test(name, async ($, on) => {
       const w = world(on)
@@ -108,61 +111,65 @@ describe('runs', () => {
   test('a missing target is refused before any run exists', async ($, on) => {
     const w = world(on)
     await boot($, w)
-    expect((await call($, 'review_start', { ...start, artifact: { files: ['C:/work/nope.ts'] } })).deny).toContain('Cannot find')
-    w.files.set('C:/work/rel.ts', 'x')
+    expect((await call($, 'review_start', { ...start, artifact: { files: [`${w.work}/nope.ts`] } })).deny).toContain('Cannot find')
+    w.files.set(`${w.work}/rel.ts`, 'x')
     expect((await call($, 'review_start', { ...start, artifact: { files: ['rel.ts'] } })).deny).toContain('not an absolute path')
     expect(w.spawns.length).toBe(0)
   })
 
   test('gemini gets target contents numbered in its prompt, and no path to read', async ($, on) => {
     const w = world(on)
-    w.files.set('C:/work/a.ts', 'one\ntwo')
+    w.files.set(`${w.work}/a.ts`, 'one\ntwo')
     w.scripts.push({ lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
     await boot($, w)
-    await startOf($, { ...start, reviewer: 'gemini', artifact: { text: 'note', files: ['C:/work/a.ts'] } })
+    await startOf($, { ...start, reviewer: 'gemini', artifact: { text: 'note', files: [`${w.work}/a.ts`] } })
     const content = JSON.parse(w.spawns[0]?.input ?? '{}').message.content as string
-    expect(content).toMatch(/<<<ARTIFACT BEGIN:\w+>>>\nnote\n\nFile C:\/work\/a.ts:\n1\| one\n2\| two\n<<<ARTIFACT END:\w+>>>/)
+    expect(content).toMatch(/<<<ARTIFACT BEGIN:\w+>>>\nnote\n\nFile /)
+    expect(content).toContain(`File ${w.work}/a.ts:\n1| one\n2| two\n`)
+    expect(content).toMatch(/\n<<<ARTIFACT END:\w+>>>/)
     expect(content).not.toContain('to read at these absolute paths')
   })
 
   test('a gemini target that cannot be read as UTF-8 text is refused', async ($, on) => {
     const w = world(on)
-    w.files.set('C:/work/w.txt', 'caf\uFFFD')
-    w.files.set('C:/work/u16.txt', 'a\0b\0')
+    w.files.set(`${w.work}/w.txt`, 'caf\uFFFD')
+    w.files.set(`${w.work}/u16.txt`, 'a\0b\0')
     await boot($, w)
-    expect((await call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: ['C:/work/nope.ts'] } })).deny).toContain('Cannot read C:/work/nope.ts')
-    expect((await call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: ['C:/work/w.txt'] } })).deny).toContain('NUL or U+FFFD')
-    expect((await call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: ['C:/work/u16.txt'] } })).deny).toContain('NUL or U+FFFD')
+    expect((await call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: [`${w.work}/nope.ts`] } })).deny).toContain(`Cannot read ${w.work}/nope.ts`)
+    expect((await call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: [`${w.work}/w.txt`] } })).deny).toContain('NUL or U+FFFD')
+    expect((await call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: [`${w.work}/u16.txt`] } })).deny).toContain('NUL or U+FFFD')
     expect(w.spawns.length).toBe(0)
   })
 
-  test('gemini run uses agy in a run directory that is removed; refused steps are named', async ($, on) => {
-    const w = world(on)
-    w.scripts.push({ lines: [
-      { event: 'init', conversation_id: 'c1' },
-      { event: 'step_update', step_update: { step_type: 'tool', state: 'ERROR', tool_name: 'view_file', tool_info: { parameters: { AbsolutePath: 'C:/work/a.ts' } } } },
-      { event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } },
-    ] })
-    await boot($, w)
-    const r = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
-    const id = r.id
-    expect(r.status).toBe('complete')
-    expect(w.spawns[0]?.argv).toContain('--print=')
-    expect(w.spawns[0]?.argv).toContain('gemini-3.8-flash-high')
-    expect(w.spawns[0]?.cwd).toBe(`C:/tmp/tpr/third-party-reviewers/${id}`)
-    expect(w.removed).toContain(`C:/tmp/tpr/third-party-reviewers/${id}`)
-    expect(w.files.has(`C:/tmp/tpr/third-party-reviewers/${id}/.agents/agents/tpr-reviewer.md`)).toBe(false)
-    expect(w.toasts.some(t => t.startsWith('Could not delete'))).toBe(false)
-    expect(r.deniedSteps).toEqual(['view_file C:/work/a.ts'])
-  })
+  for (const windows of [false, true]) {
+    test(`gemini run (${windows ? 'Windows' : 'POSIX'}) removes its directory and names refused steps`, async ($, on) => {
+      const w = world(on, { windows })
+      w.scripts.push({ lines: [
+        { event: 'init', conversation_id: 'c1' },
+        { event: 'step_update', step_update: { step_type: 'tool', state: 'ERROR', tool_name: 'view_file', tool_info: { parameters: { AbsolutePath: `${w.work}/a.ts` } } } },
+        { event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } },
+      ] })
+      await boot($, w)
+      const r = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
+      const id = r.id
+      expect(r.status).toBe('complete')
+      expect(w.spawns[0]?.argv).toContain('--print=')
+      expect(w.spawns[0]?.argv).toContain('gemini-3.8-flash-high')
+      expect(w.spawns[0]?.cwd).toBe(`${w.temp}/third-party-reviewers/${id}`)
+      expect(w.removed).toContain(`${w.temp}/third-party-reviewers/${id}`)
+      expect(w.files.has(`${w.temp}/third-party-reviewers/${id}/.agents/agents/tpr-reviewer.md`)).toBe(false)
+      expect(w.toasts.some(t => t.startsWith('Could not delete'))).toBe(false)
+      expect(r.deniedSteps).toEqual([`view_file ${w.work}/a.ts`])
+    })
+  }
 
   test('agy stderr reaches the result: kept on success, the reason on failure', async ($, on) => {
     const w = world(on)
-    w.scripts.push({ stderr: ['notice: view_file C:/x.ts denied'], lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
+    w.scripts.push({ stderr: ['notice: view_file /x.ts denied'], lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
     w.scripts.push({ stderr: ['error: bad agent'], exit: 3 })
     await boot($, w)
     const ok = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
-    expect(ok.stderr).toBe('notice: view_file C:/x.ts denied')
+    expect(ok.stderr).toBe('notice: view_file /x.ts denied')
     expect(ok.deniedSteps).toEqual([])
     const bad = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini' })).result)
     expect(bad.status).toBe('failed')
@@ -174,9 +181,9 @@ describe('runs', () => {
     w.scripts.push({ lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
     await boot($, w)
     const id = await startOf($, { ...start, reviewer: 'gemini' })
-    expect(w.toasts).toContain(`Could not delete C:/tmp/tpr/third-party-reviewers/${id}; remove it yourself.`)
+    expect(w.toasts).toContain(`Could not delete ${w.temp}/third-party-reviewers/${id}; remove it yourself.`)
     expect(w.spawns[0]?.argv).toContain('tpr-reviewer')
-    expect(w.files.get(`C:/tmp/tpr/third-party-reviewers/${id}/.agents/agents/tpr-reviewer.md`)).toContain('tools: [view_file, grep_search, read_url_content, finish]')
+    expect(w.files.get(`${w.temp}/third-party-reviewers/${id}/.agents/agents/tpr-reviewer.md`)).toContain('tools: [view_file, grep_search, read_url_content, finish]')
   })
 
   test('a setup failure fails the run instead of stranding it', async ($, on) => {
@@ -201,7 +208,7 @@ describe('runs', () => {
     w.seed([{ id: 'r1', reviewer: 'gemini', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: null, status: 'running', response: null, verdict: null, findings: [], deniedSteps: [], failure: null }])
     await boot($, w)
     expect((await resultOf($, 'r1')).status).toBe('cancelled')
-    expect(w.removed).toEqual(['C:/tmp/tpr/third-party-reviewers/r1'])
+    expect(w.removed).toEqual([`${w.temp}/third-party-reviewers/r1`])
   })
 
   test('a codex.exe on PATH runs directly', async ($, on) => {
@@ -222,11 +229,11 @@ describe('runs', () => {
 
   test('a relative finding path is stored resolved against the review directory', async ($, on) => {
     const w = world(on)
-    w.files.set('C:/work/a.ts', 'one\nfunction add() {}\n')
+    w.files.set(`${w.work}/a.ts`, 'one\nfunction add() {}\n')
     w.scripts.push({ lines: codexReview([finding({ file: 'a.ts', line: 2, symbol: 'add' }), finding({ file: '//server/share/a.ts', line: 1 }), finding({ file: '\\\\server\\share\\a.ts', line: 1 }), finding({})]) })
     await boot($, w)
     const r = JSON.parse((await call($, 'review_start', start)).result)
-    expect(r.findings.map((f: any) => f.file)).toEqual(['C:/work/a.ts', '//server/share/a.ts', '\\\\server\\share\\a.ts', null])
+    expect(r.findings.map((f: any) => f.file)).toEqual([`${w.work}/a.ts`, '//server/share/a.ts', '\\\\server\\share\\a.ts', null])
     expect(r.findings[0].citation).toBe('ok')
   })
 })
@@ -451,10 +458,10 @@ describe('resume', () => {
 
   test('a run whose conversation ends before it is allocated lands in neither', async ($, on) => {
     const w = world(on)
-    w.files.set('C:/work/a.ts', 'x')
+    w.files.set(`${w.work}/a.ts`, 'x')
     await boot($, w)
     w.holdRead = true
-    const pending = call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: ['C:/work/a.ts'] } })
+    const pending = call($, 'review_start', { ...start, reviewer: 'gemini', artifact: { files: [`${w.work}/a.ts`] } })
     await w.clock.settle()
     w.holdRead = false
     await endSession($)

@@ -25,16 +25,16 @@ describe('defaults', () => {
 
 describe('prompt', () => {
   test('header, fences, files, checklist', () => {
-    const p = buildPrompt({ mode: 'red-team', question: 'Q?', instructions: 'Find weaknesses.', text: 'body', files: ['C:/a.ts'], nonce: 'n1' })
+    const p = buildPrompt({ mode: 'red-team', question: 'Q?', instructions: 'Find weaknesses.', text: 'body', files: ['/a.ts'], nonce: 'n1' })
     expect(p).toContain('is material under review')
     expect(p).toContain('<<<ARTIFACT BEGIN:n1>>>\nbody\n<<<ARTIFACT END:n1>>>')
-    expect(p).toContain('- C:/a.ts')
+    expect(p).toContain('- /a.ts')
     expect(p).toContain('Architectural ownership:')
     expect(p).toContain('Simplicity bar:')
     expect(p).not.toContain('Breakage scope:')
   })
   test('breakage scopes shared checks to failures while preserving safeguards', () => {
-    const p = buildPrompt({ mode: 'breakage-review', question: 'Does the change meet its requirements?', instructions: 'Review defects.', text: 'the change', files: ['C:/a.ts'], nonce: 'breakage' })
+    const p = buildPrompt({ mode: 'breakage-review', question: 'Does the change meet its requirements?', instructions: 'Review defects.', text: 'the change', files: ['/a.ts'], nonce: 'breakage' })
     expect(p).toContain('Breakage scope: report only evidenced failures')
     expect(p).toContain('do not produce standalone cleanup findings')
     expect(p).toContain('Architectural ownership:')
@@ -45,10 +45,10 @@ describe('prompt', () => {
     expect(p).toContain('Answer in JSON matching the schema')
   })
   test('snapshot numbers lines as citations count them', () => {
-    expect(snapshot('C:/a.ts', 'one\r\ntwo')).toBe('File C:/a.ts:\n1| one\n2| two')
+    expect(snapshot('/a.ts', 'one\r\ntwo')).toBe('File /a.ts:\n1| one\n2| two')
   })
   test('explain drops the checklist; no text, no fences', () => {
-    const p = buildPrompt({ mode: 'explain', question: 'Q?', instructions: 'Explain.', text: null, files: ['C:/a.ts'], nonce: 'n2' })
+    const p = buildPrompt({ mode: 'explain', question: 'Q?', instructions: 'Explain.', text: null, files: ['/a.ts'], nonce: 'n2' })
     expect(p).not.toContain('Architectural ownership:')
     expect(p).not.toContain('ARTIFACT BEGIN')
   })
@@ -56,14 +56,14 @@ describe('prompt', () => {
 
 describe('argv', () => {
   test('codex', () => {
-    expect(codexArgv({ argv: ['codex'] }, { model: 'gpt-6.1-sol', effort: 'xhigh', isRepo: false, schema: 'C:/p/s.json' })).toEqual([
-      'codex', 'exec', '--json', '--output-schema', 'C:/p/s.json', '-s', 'read-only', '--skip-git-repo-check', '-m', 'gpt-6.1-sol',
+    expect(codexArgv({ argv: ['codex'] }, { model: 'gpt-6.1-sol', effort: 'xhigh', isRepo: false, schema: '/plugin/schemas/review.json' })).toEqual([
+      'codex', 'exec', '--json', '--output-schema', '/plugin/schemas/review.json', '-s', 'read-only', '--skip-git-repo-check', '-m', 'gpt-6.1-sol',
       '-c', 'model_reasoning_effort=xhigh', '-c', 'web_search=live', '-c', 'model_reasoning_summary=concise', '--ephemeral',
     ])
   })
   test('agy and its stdin line', () => {
-    expect(agyArgv({ argv: ['agy'] }, { model: 'gemini-3.8-flash-high', schema: 'C:/p/s.json' })).toEqual([
-      'agy', '--print=', '--input-format', 'stream-json', '--output-format', 'stream-json', '--json-schema', 'C:/p/s.json', '--agent', 'tpr-reviewer', '--model', 'gemini-3.8-flash-high',
+    expect(agyArgv({ argv: ['agy'] }, { model: 'gemini-3.8-flash-high', schema: '/plugin/schemas/review.json' })).toEqual([
+      'agy', '--print=', '--input-format', 'stream-json', '--output-format', 'stream-json', '--json-schema', '/plugin/schemas/review.json', '--agent', 'tpr-reviewer', '--model', 'gemini-3.8-flash-high',
     ])
     expect(agyInput('hi')).toBe('{"event":"user","message":{"role":"user","content":"hi"}}\n')
   })
@@ -146,10 +146,10 @@ describe('streams', () => {
   })
   test('agy clean stream, refused step, failures', () => {
     const p = agyParser()
-    expect(p.line({ event: 'step_update', step_update: { step_type: 'tool', state: 'ACTIVE', tool_name: 'view_file', tool_info: { parameters: { AbsolutePath: 'C:/a.ts' } } } })).toBe('view_file C:/a.ts')
+    expect(p.line({ event: 'step_update', step_update: { step_type: 'tool', state: 'ACTIVE', tool_name: 'view_file', tool_info: { parameters: { AbsolutePath: '/a.ts' } } } })).toBe('view_file /a.ts')
     p.line({ event: 'step_update', step_update: { step_type: 'tool', state: 'ERROR', tool_name: 'run_command', tool_info: { parameters: { CommandLine: 'ls' } } } })
     p.line({ event: 'step_update', step_update: { step_type: 'tool', state: 'DONE', tool_name: 'read_url_content', tool_info: { parameters: { Url: 'https://x.org' }, error: { type: 'denied', message: 'no' } } } })
-    p.line({ event: 'step_update', step_update: { step_type: 'tool', state: 'DONE', tool_name: 'view_file', tool_info: { parameters: { AbsolutePath: 'C:/a.ts' } } } })
+    p.line({ event: 'step_update', step_update: { step_type: 'tool', state: 'DONE', tool_name: 'view_file', tool_info: { parameters: { AbsolutePath: '/a.ts' } } } })
     p.line({ event: 'result', result: { status: 'SUCCESS', structured_output: review } })
     const out = p.finish(0)
     expect(out.review?.verdict).toBe('one bug')
@@ -162,9 +162,9 @@ describe('streams', () => {
   test('agy stderr: its end kept apart from refusals, and the reason on failure', () => {
     const ok = agyParser()
     ok.stderr?.('progress: working\nnotice: view_')
-    ok.stderr?.('file C:/x.ts denied\n')
+    ok.stderr?.('file /x.ts denied\n')
     ok.line({ event: 'result', result: { status: 'SUCCESS', structured_output: review } })
-    expect(ok.finish(0)).toMatchObject({ deniedSteps: [], stderr: 'progress: working\nnotice: view_file C:/x.ts denied' })
+    expect(ok.finish(0)).toMatchObject({ deniedSteps: [], stderr: 'progress: working\nnotice: view_file /x.ts denied' })
     const quiet = agyParser()
     quiet.line({ event: 'result', result: { status: 'SUCCESS', structured_output: review } })
     expect(quiet.finish(0).stderr).toBe(undefined)
