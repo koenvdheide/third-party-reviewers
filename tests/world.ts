@@ -7,12 +7,12 @@ const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isSt
 
 const WINDOWS_CODEX_EXE = '/u/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
 
-export function world(on: On, opts: { windows?: boolean; codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; failPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean | string; storeCap?: number } = {}) {
+export function world(on: On, opts: { windows?: boolean; codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; failPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean | string; storeCap?: number; env?: Record<string, string> } = {}) {
   const clock = mock.clock(on)
   const work = '/work'
   const temp = '/tmp/tpr'
   const windows = opts.windows ?? opts.nativeCodex !== undefined
-  mock.env(on, { OS: windows ? 'Windows_NT' : 'Linux', TEMP: temp })
+  mock.env(on, { OS: windows ? 'Windows_NT' : 'Linux', TEMP: temp, ...opts.env })
   const files = new Map<string, string>([[WINDOWS_CODEX_EXE, '']])
   const state = new Map<string, { value: unknown; version: number }>()
   const store = new Map<string, unknown>()
@@ -40,7 +40,7 @@ export function world(on: On, opts: { windows?: boolean; codex?: boolean; native
     // With holdWrites on, each write of the runs ledger waits here until the test releases it.
     holdWrites: false,
     heldWrites: [] as (() => void)[],
-    // Where the session draws; empty, as in a -p run, review_start waits for the review.
+    // Where the session draws; empty in a -p run.
     surfaces: [] as RenderSurface[],
     // Each silent child waits here until the test lets it write its lines.
     waiting: [] as (() => void)[],

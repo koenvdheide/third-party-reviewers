@@ -22,6 +22,8 @@ const choiceKey = (reviewer: Reviewer, depth: string) => `${BUTTON}|${reviewer}|
 const CHOICES = (Object.keys(NAME) as Reviewer[]).flatMap(r => [choiceKey(r, 'One round'), choiceKey(r, 'To convergence')])
 const ENDED = 'The conversation changed, so the review was dropped.'
 const ABSOLUTE = /^(?:[A-Za-z]:[\\/]|[\\/])/
+// The CLAUDE_CODE_ENTRYPOINT the desktop app gives its CLI, the second for its third-party-provider build.
+const DESKTOP = ['claude-desktop', 'claude-desktop-3p']
 
 const runs = atom({ plugin: 'third-party-reviewers', key: 'runs' } as const, [])
 // The finding the pane has open, if any.
@@ -443,7 +445,7 @@ async function registerTools($: Engine, i: Installed): Promise<void> {
   const names = reviewers.map(r => NAME[r]).join(' or ')
   await $.tool.register({
     name: 'review_start',
-    description: `Start an independent review by ${names}. Returns the run at once while the reviewer works; when it ends, the plugin sends a message naming the run: read the result then with review_results, without polling. Where nothing draws, as in a -p run, the call waits and returns the result. Read the codex or antigravity skill and its required skills/review-guide.md for mode instructions and handling findings; the provider skill supplies execution and recovery rules.`,
+    description: `Start an independent review by ${names}. Returns the run at once while the reviewer works; when it ends, the plugin sends a message naming the run: read the result then with review_results, without polling. Where nothing draws, as in a -p run, the call waits and returns the result; a desktop app session gets the run at once. Read the codex or antigravity skill and its required skills/review-guide.md for mode instructions and handling findings; the provider skill supplies execution and recovery rules.`,
     inputSchema: {
       type: 'object',
       required: ['reviewer', 'mode', 'question', 'instructions', 'artifact'],
@@ -552,9 +554,15 @@ export const register: Register = on => {
       if (/[\0\uFFFD]/.test(content)) return { deny: `${file} contains NUL or U+FFFD characters, as a file that is not UTF-8 text reads, so it cannot go into Gemini's prompt.` }
       texts.push(snapshot(file, content))
     }
-    // Where nothing draws (a -p run, an SDK host) the session ends with the run, so the call
-    // waits for it; elsewhere it returns the run at once and the plugin announces its end.
-    const isBackground = (await $.session.surfaces()).length > 0
+    // Where nothing draws (a -p run, an SDK host) the session may end with the run, so the call
+    // waits for it; elsewhere it returns the run at once and the plugin announces its end. The
+    // desktop app draws only while its session has focus, yet the session outlives the run, so
+    // its entrypoint counts. A claude -p started under it inherits that entrypoint; the markers
+    // Claude Code sets on its shells, hooks and MCP servers tell such a child apart, but one
+    // started by a mod's process or an LSP server carries none, so its review is lost.
+    const isDesktop = DESKTOP.includes((await $.env.get('CLAUDE_CODE_ENTRYPOINT')) ?? '')
+    const isChild = Boolean((await $.env.get('CLAUDE_CODE_CHILD_SESSION')) || (await $.env.get('CLAUDECODE')))
+    const isBackground = (await $.session.surfaces()).length > 0 || (isDesktop && !isChild)
     const { run: started, settled } = await startRun($, {
       reviewer: input.reviewer, mode: input.mode, question: input.question, instructions: input.instructions,
       text: texts.length > 0 ? texts.join('\n\n') : null, files, effort, model, exe,
