@@ -44,9 +44,6 @@ const HEADER =
 const BREAKAGE_SCOPE =
   'Breakage scope: report only evidenced failures of requirements, invariants or necessary operations. Apply the ownership and simplicity checks below to those failures and their smallest corrective fixes; do not produce standalone cleanup findings.'
 
-const STRATEGIC_SCOPE =
-  `Strategic scope: under the simplicity bar below, a recommendation that adds a module, interface or layer also passes when it removes a maintenance cost the code shows (cite where), serves work the brief names, or gives an external boundary a seam that callers or tests need. The bar's single-caller and single-implementation rule covers layers that only forward or rename, because a split along a real responsibility boundary can leave each part with one caller.`
-
 const OWNERSHIP = `Architectural ownership:
 For code and technical plans, trace the execution path and identify the owner of
 each changed behaviour or shared fact, including dependencies, forks, and tools
@@ -82,9 +79,9 @@ export function buildPrompt(p: PromptParts): string {
   if (p.text !== null) out.push(`<<<ARTIFACT BEGIN:${p.nonce}>>>`, p.text, `<<<ARTIFACT END:${p.nonce}>>>`, '')
   out.push(p.instructions, '')
   if (p.mode === 'breakage-review') out.push(BREAKAGE_SCOPE, '')
-  if (p.mode === 'strategic-review') out.push(STRATEGIC_SCOPE, '')
   if (p.mode !== 'explain') out.push(OWNERSHIP, '')
-  out.push(SIMPLICITY, '', RETURN)
+  if (p.mode !== 'strategic-review') out.push(SIMPLICITY, '')
+  out.push(RETURN)
   return out.join('\n')
 }
 

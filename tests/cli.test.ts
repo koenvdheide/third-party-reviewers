@@ -32,7 +32,6 @@ describe('prompt', () => {
     expect(p).toContain('Architectural ownership:')
     expect(p).toContain('Simplicity bar:')
     expect(p).not.toContain('Breakage scope:')
-    expect(p).not.toContain('Strategic scope:')
   })
   test('breakage scopes shared checks to failures while preserving safeguards', () => {
     const p = buildPrompt({ mode: 'breakage-review', question: 'Does the change meet its requirements?', instructions: 'Review defects.', text: 'the change', files: ['/a.ts'], nonce: 'breakage' })
@@ -45,9 +44,10 @@ describe('prompt', () => {
     expect(p).toContain('<<<ARTIFACT BEGIN:breakage>>>')
     expect(p).toContain('Answer in JSON matching the schema')
   })
-  test('strategic review says what justifies an added abstraction', () => {
+  test('strategic review drops the simplicity bar', () => {
     const p = buildPrompt({ mode: 'strategic-review', question: 'Q?', instructions: 'Judge the structure.', text: 'body', files: [], nonce: 'n3' })
-    expect(p).toContain('Strategic scope: under the simplicity bar below')
+    expect(p).not.toContain('Simplicity bar:')
+    expect(p).toContain('Answer in JSON matching the schema')
   })
   test('snapshot numbers lines as citations count them', () => {
     expect(snapshot('/a.ts', 'one\r\ntwo')).toBe('File /a.ts:\n1| one\n2| two')
