@@ -205,10 +205,19 @@ describe('runs', () => {
 
   test('a running row left by a reload is marked cancelled', async ($, on) => {
     const w = world(on)
-    w.seed([{ id: 'r1', reviewer: 'gemini', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: null, status: 'running', response: null, verdict: null, findings: [], deniedSteps: [], failure: null }])
+    const row = { id: 'r1', reviewer: 'gemini', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: null, status: 'running', response: null, verdict: null, findings: [], deniedSteps: [], failure: null }
+    w.seed([row])
+    w.store.set('runs:s1', { savedAt: 0, runs: [row] })
     await boot($, w)
-    expect((await resultOf($, 'r1')).status).toBe('cancelled')
+    const r = await resultOf($, 'r1')
+    expect(r.status).toBe('cancelled')
+    expect(r.failure).toContain('loaded again')
+    expect(r.failure).not.toContain('session ended')
     expect(w.removed).toEqual([`${w.temp}/third-party-reviewers/r1`])
+    // A resume reads the stored ledger, so the reload's cause must have been saved there.
+    await endSession($)
+    await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
+    expect((await resultOf($, 'r1')).failure).toContain('loaded again')
   })
 
   test('a codex.exe on PATH runs directly', async ($, on) => {
@@ -432,7 +441,8 @@ describe('resume', () => {
     expect((await resultOf($, done)).findings[0].status).toBe('applied')
     const cancelled = await resultOf($, running)
     expect(cancelled.status).toBe('cancelled')
-    expect(cancelled.failure).toContain('conversation ended')
+    expect(cancelled.failure).toContain('session ended')
+    expect(cancelled.failure).not.toContain('loaded again')
     expect((await call($, 'review_results', { runId: other })).deny).toContain('no run')
     // Compaction keeps the conversation, so the store is not read back.
     w.store.delete('runs:s1')
@@ -504,6 +514,24 @@ describe('resume', () => {
     expect((await pending).deny).toContain('conversation changed')
     expect(w.runs()).toEqual([])
     expect(w.store.has('runs:s2')).toBe(false)
+  })
+
+  test('a reload cleanup that a resume overtakes saves nothing under the conversation left', async ($, on) => {
+    const w = world(on)
+    const row = { id: 'r1', reviewer: 'codex', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: null, status: 'running', response: null, verdict: null, findings: [], deniedSteps: [], failure: null }
+    w.seed([row])
+    w.store.set('runs:s1', { savedAt: 0, runs: [row] })
+    w.store.set('runs:s2', { savedAt: 0, runs: [{ ...row, id: 'r2', status: 'complete' }] })
+    w.holdWrites = true
+    const started = boot($, w)
+    await w.clock.settle()
+    w.holdWrites = false
+    await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
+    // As in Claude Code, the session id names the conversation left behind until the resume is done.
+    await $.classic.SessionStart({ source: 'resume', session_id: 's2' })
+    w.heldWrites.forEach(release => release())
+    await started
+    expect((w.store.get('runs:s1') as any).runs.map((r: any) => r.id)).toEqual(['r1'])
   })
 
   test('a resume waits for a save still in flight', async ($, on) => {

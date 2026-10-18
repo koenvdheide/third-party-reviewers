@@ -165,7 +165,7 @@ async function restore($: Engine, sessionId: string): Promise<void> {
   await saving
   const saved = (await $.store.get(savedKey(sessionId))) as Saved | undefined
   await update($, runs, () => saved?.runs ?? [])
-  await markOrphans($)
+  await markOrphans($, LEFT)
 }
 
 // Rewrites each run's count that differs from its ledger, so a count a failed write or a race
@@ -415,15 +415,19 @@ async function announce($: Engine, settled: Promise<Run>, gen: number): Promise<
 // stops its reviews without recording it. A Gemini run's directory stays on disk.
 // `$.state` only: during an in-process /resume, `$.session.id()` still names the conversation
 // left behind, so a store write would land under its key. Every restore marks the rows again.
-async function markOrphans($: Engine): Promise<void> {
+async function markOrphans($: Engine, failure: string): Promise<boolean> {
   const orphans = (await read($, runs)).filter(r => r.status === 'running' && !stoppers.has(r.id))
-  if (orphans.length === 0) return
+  if (orphans.length === 0) return false
   for (const r of orphans) if (r.reviewer === 'gemini') await removeDir($, await runDirOf($, r.id))
   const endedAt = await $.clock.now()
   await update($, runs, list =>
-    list.map(r => (orphans.some(o => o.id === r.id) ? { ...r, status: 'cancelled' as const, endedAt, failure: 'The plugin reloaded or the conversation ended while this review ran, which ended it.' } : r)),
+    list.map(r => (orphans.some(o => o.id === r.id) ? { ...r, status: 'cancelled' as const, endedAt, failure } : r)),
   )
+  return true
 }
+// Claude reports a run's failure as its cause, so each names only its own.
+const RELOADED = "The plugin was loaded again while this review ran, which stopped it. Updating the plugin does this in the desktop app's open local sessions."
+const LEFT = "This conversation's Claude Code session ended while this review ran, which stopped it. Exiting Claude Code, leaving the conversation with /clear or /resume, and the desktop app ending an idle local session when too many are open or when it quits all do this."
 
 async function endSession($: Engine): Promise<void> {
   generation += 1
@@ -489,9 +493,12 @@ function instruction(reviewer: Reviewer, depth: string): string {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    const gen = generation
     const started = await next(e)
     installed = null
-    await markOrphans($)
+    // These rows are the current conversation's, so the cause is saved; a resume would otherwise
+    // read them as running and blame the conversation's end.
+    if (await markOrphans($, RELOADED)) await change($, list => list, gen)
     await registerTools($, await ensure($))
     // Pruning waits for the counts, so no ledger goes before its runs are counted.
     const counted = await countStored($).then(
