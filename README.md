@@ -32,6 +32,7 @@ Prompts that work:
 - "Ask Codex to red-team the plan in docs/plan.md."
 - "Have Gemini check my uncommitted changes for breakage."
 - "Get Codex's view on why this test only fails on Windows."
+- "Ask Gemini for a strategic review of src/parser: is it structured for the next file format?"
 - "Review this branch with Codex until convergence."
 
 ## What it runs, sends and writes

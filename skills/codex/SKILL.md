@@ -2,8 +2,8 @@
 name: codex
 description: >-
   Use when the user asks for an independent Codex (OpenAI) perspective on a
-  concrete question or artifact: brainstorming, breakage review, red-teaming, simplification and
-  churn reviews, debugging, reviewing
+  concrete question or artifact: brainstorming, breakage review, red-teaming, simplification,
+  churn and strategic design reviews, debugging, reviewing
   plans, diffs or prose, extracting requirements, rollout, test gaps, explanation,
   incident analysis or security hypotheses. Requests naming Codex or an
   OpenAI model for that work select this skill. Exclude questions about the
