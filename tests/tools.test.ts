@@ -11,6 +11,17 @@ const codexReview = (findings: unknown[]) => [
 const start = { reviewer: 'codex', mode: 'red-team', question: 'Q?', instructions: 'Find weaknesses.', artifact: { text: 'body' } }
 const startOf = async ($: any, args: Record<string, unknown> = start) => JSON.parse((await call($, 'review_start', args)).result).id as string
 const resultOf = async ($: any, runId: string) => JSON.parse((await call($, 'review_results', { runId })).result)
+const PAUSES = 'The Claude desktop app pauses idle conversations when memory runs low, which stops their reviews.'
+// Keys inferred, so each is a SessionEndReason the engine's session.end accepts.
+const ENDED_BY = {
+  clear: 'This review stopped when /clear started a new conversation.',
+  resume: 'This review stopped when /resume switched to another conversation.',
+  prompt_input_exit: 'This review stopped when Claude Code was exited.',
+  logout: 'This review stopped when Claude Code logged out.',
+  other: `This review stopped when the Claude Code process running it shut down. ${PAUSES}`,
+}
+const REASONS = Object.keys(ENDED_BY) as (keyof typeof ENDED_BY)[]
+const storedRun = (w: any, id: string) => (w.store.get('runs:s1') as any).runs.find((r: any) => r.id === id)
 
 describe('runs', () => {
   for (const windows of [false, true]) {
@@ -665,5 +676,89 @@ describe('skill note', () => {
     await boot($, w)
     expect((await $.skill.prompt({ skill: 'third-party-reviewers:codex', text: 'original' })).text).toBe('original')
     expect((await $.skill.prompt({ skill: 'constructor', text: 'original' })).text).toBe('original')
+  })
+})
+
+describe('conversation end', () => {
+  for (const reason of REASONS) {
+    const cause = ENDED_BY[reason]
+    test(`a ${reason} end records its cause on the run it stopped, which stays running in the store`, async ($, on) => {
+      const w = world(on)
+      w.surfaces = ['desktop']
+      w.scripts.push({ silent: true })
+      await boot($, w)
+      const id = await startOf($)
+      await $.session.end({ reason, sessionId: 's1', resume: { id: 's1' } })
+      await w.clock.settle()
+      expect(storedRun(w, id).status).toBe('running')
+      expect(storedRun(w, id).failure).toBe(cause)
+    })
+  }
+
+  test('an end stops its reviews before a held ledger write lands, and its cause lands after it', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ lines: codexReview([finding({})]) }, { silent: true })
+    await boot($, w)
+    const done = await startOf($)
+    await w.clock.settle()
+    const live = await startOf($)
+    w.holdStore = true
+    const record = call($, 'review_record', { findingId: `${done}.1`, status: 'applied', evidence: 'fixed' })
+    await w.clock.settle()
+    const ended = endSession($)
+    await w.clock.settle()
+    expect(w.runs()).toEqual([])
+    w.holdStore = false
+    w.heldStore.splice(0).forEach(release => release())
+    await Promise.all([record, ended])
+    await w.clock.settle()
+    expect(storedRun(w, done).findings[0].status).toBe('applied')
+    expect(storedRun(w, live).status).toBe('running')
+    expect(storedRun(w, live).failure).toBe(ENDED_BY.clear)
+  })
+
+  test('a cancel whose own write an end overtakes is saved cancelled', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ lines: codexReview([finding({})]) }, { silent: true })
+    await boot($, w)
+    const done = await startOf($)
+    await w.clock.settle()
+    const live = await startOf($)
+    w.holdStore = true
+    const record = call($, 'review_record', { findingId: `${done}.1`, status: 'applied', evidence: 'fixed' })
+    await w.clock.settle()
+    expect((await call($, 'review_cancel', { runId: live })).result).toContain('Cancelled')
+    await w.clock.settle()
+    const ended = endSession($)
+    await w.clock.settle()
+    w.holdStore = false
+    w.heldStore.splice(0).forEach(release => release())
+    await Promise.all([record, ended])
+    await w.clock.settle()
+    expect(storedRun(w, live).status).toBe('cancelled')
+  })
+
+  test('a cancel whose refused write is replaced while an end overtakes it is saved cancelled', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true })
+    await boot($, w)
+    const id = await startOf($)
+    w.failRunsWrites = 1
+    w.holdWrites = true
+    const cancelling = call($, 'review_cancel', { runId: id })
+    for (let i = 0; i < 50 && w.heldWrites.length < 1; i++) await w.clock.advance(0)
+    // consume's write goes on and is refused; startRun.fail then writes the cancel again.
+    w.heldWrites.shift()?.()
+    for (let i = 0; i < 50 && w.heldWrites.length < 1; i++) await w.clock.advance(0)
+    const ended = endSession($)
+    for (let i = 0; i < 50 && w.heldWrites.length < 2; i++) await w.clock.advance(0)
+    w.holdWrites = false
+    w.heldWrites.splice(0).forEach(release => release())
+    await Promise.all([cancelling, ended])
+    await w.clock.settle()
+    expect(storedRun(w, id).status).toBe('cancelled')
   })
 })

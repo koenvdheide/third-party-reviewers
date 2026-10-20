@@ -138,11 +138,11 @@ async function runDirOf($: Engine, id: string): Promise<string> {
   return `${tmp}/third-party-reviewers/${id}`
 }
 
-// Every ledger change saved to the store goes through here; restore, markOrphans and the
-// session-end wipe write `$.state` only. Changes queue, each stored with the ledger it
-// wrote, so the store holds them in order; a dispatch's own reads would see only its
-// moment. One made before the conversation changed is dropped, on each of update's retries
-// too, so it never lands in, or under the key of, another conversation.
+// Every ledger change saved to the store goes through here except an ended conversation's, which
+// rewriteStored writes; restore, markOrphans and the session-end wipe write `$.state` only. Changes
+// queue, each stored with the ledger it wrote, so the store holds them in order; a dispatch's own
+// reads would see only its moment. One made before the conversation changed is dropped, on each
+// of update's retries too, so it never lands in, or under the key of, another conversation.
 // `gen` is the generation the caller's work began in.
 async function change($: Engine, fn: (list: Run[]) => Run[], gen = generation): Promise<void> {
   const turn = saving.then(async () => {
@@ -166,6 +166,17 @@ async function restore($: Engine, sessionId: string): Promise<void> {
   const saved = (await $.store.get(savedKey(sessionId))) as Saved | undefined
   await update($, runs, () => saved?.runs ?? [])
   await markOrphans($, LEFT)
+}
+
+// Rewrites a conversation's stored ledger by its id, queued behind every ledger write already
+// made, so it lands on the latest. Best effort: a failure leaves the stored rows as they were.
+async function rewriteStored($: Engine, sessionId: string, fn: (r: Run) => Run): Promise<void> {
+  const turn = saving.then(async () => {
+    const saved = (await $.store.get(savedKey(sessionId))) as Saved | undefined
+    if (saved !== undefined) await $.store.set(savedKey(sessionId), { ...saved, runs: saved.runs.map(fn) })
+  })
+  saving = turn.catch(() => undefined)
+  await saving
 }
 
 // Rewrites each run's count that differs from its ledger, so a count a failed write or a race
@@ -253,9 +264,11 @@ async function startRun($: Engine, req: StartRequest, gen: number, signal: Abort
   const fail = async (err: unknown): Promise<Run> => {
     const endedAt = await $.clock.now()
     const failure = `The review failed: ${err instanceof Error ? err.message : String(err)}`
-    // A stop that was asked for stays a cancellation, whatever failed after it.
-    const status = cancelled.delete(id) || signal.aborted ? ('cancelled' as const) : ('failed' as const)
+    // A stop that was asked for stays a cancellation, whatever failed after it. The marker stays
+    // until this write has settled, as in consume, so an end that overtakes it still sees the cancel.
+    const status = cancelled.has(id) || signal.aborted ? ('cancelled' as const) : ('failed' as const)
     await change($, list => list.map(r => (r.id === id ? { ...r, status, endedAt, failure } : r)), gen)
+    cancelled.delete(id)
     // After the row, as in consume.
     if (runDir !== null) await removeDir($, runDir).catch(() => undefined)
     return { ...run, status, endedAt, failure }
@@ -428,6 +441,18 @@ async function markOrphans($: Engine, failure: string): Promise<boolean> {
 // Claude reports a run's failure as its cause, so each names only its own.
 const RELOADED = "The plugin was loaded again while this review ran, which stopped it. Updating the plugin does this in the desktop app's open local sessions."
 const LEFT = "This conversation's Claude Code session ended while this review ran, which stopped it. Exiting Claude Code, leaving the conversation with /clear or /resume, and the desktop app ending an idle local session when too many are open or when it quits all do this."
+// What the app does in general, never a claim about one run: its pause ends the CLI process.
+const PAUSES = 'The Claude desktop app pauses idle conversations when memory runs low, which stops their reviews.'
+// By the reason the engine gave for the end of the conversation that stopped the run.
+const ENDED_BY: Record<string, string> = {
+  clear: 'This review stopped when /clear started a new conversation.',
+  resume: 'This review stopped when /resume switched to another conversation.',
+  prompt_input_exit: 'This review stopped when Claude Code was exited.',
+  logout: 'This review stopped when Claude Code logged out.',
+  // Also a signal, or a -p run's normal end: the process ended, for a reason the plugin is not told.
+  other: `This review stopped when the Claude Code process running it shut down. ${PAUSES}`,
+}
+const UNRECORDED = `This review stopped before it finished, and nothing recorded what stopped it. ${PAUSES}`
 
 async function endSession($: Engine): Promise<void> {
   generation += 1
@@ -520,7 +545,25 @@ export const register: Register = on => {
   })
 
   on('session.end', async ($, e, next) => {
+    // Once the generation moves, this conversation's own writes skip the store, so the end saves
+    // what it stopped: the cause on each run it stopped, and each cancel still waiting for its
+    // write (consume drops a run's stopper before that write).
+    const live = new Set(stoppers.keys())
+    const cancelling = new Set(cancelled)
     await endSession($)
+    if (live.size > 0 || cancelling.size > 0) {
+      const cause = ENDED_BY[e.reason] ?? UNRECORDED
+      const endedAt = await $.clock.now()
+      await rewriteStored($, e.sessionId, r =>
+        r.status !== 'running'
+          ? r
+          : cancelling.has(r.id)
+            ? { ...r, status: 'cancelled' as const, endedAt }
+            : live.has(r.id) && r.failure === null
+              ? { ...r, failure: cause }
+              : r,
+      )
+    }
     return next(e)
   })
 
