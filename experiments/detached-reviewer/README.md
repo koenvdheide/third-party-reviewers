@@ -82,15 +82,26 @@ CI job is not a claim that it has passed on that OS.
 | Cancellation after host death | A matching job token stops the fake reviewer before publishing cancellation |
 | Wrong-job cancellation | A different token does not cancel the job |
 | Unattended deadline | A living worker terminates its immediate child and records timeout |
-| **Hard-killed worker counterexample** | **Reviewer continues heartbeating; no terminal result is written** |
+| **Hard-killed worker counterexample (POSIX)** | **Reviewer continues heartbeating; no terminal result is written** |
+| Hard-killed worker (Windows) | Attached fake reviewer also terminates; no terminal result is written |
 
-Locally verified: Linux, Node 24.19.0; **10 process tests pass**, and **134 existing
-mod tests pass** under Claude Code 2.1.301. Windows and macOS were not executed
-locally. The last test passes by detecting an orphan and then cleaning it up; it
+Locally verified: Linux, Node 24.19.0; **10 process tests pass** (one Windows-only
+case skipped), and **134 existing mod tests pass** under Claude Code 2.1.301.
+Windows and macOS were not executed locally. The POSIX counterexample passes
+by detecting an orphan and then cleaning it up; it
 does **not** prove orphan prevention. A process-group test does not simulate a
 Windows Job Object, containing cgroup, recursive descendant kill, or Desktop.
 The new-reader test is file recovery, not plugin result import or message delivery.
 Atomic rename gives complete-file visibility, not power-loss durability.
+
+The Windows CI run confirmed parent-exit survival, cancellation, recovery,
+deadline and host cleanup, but its reviewer stopped on worker death instead of
+remaining orphaned. The suite therefore asserts worker-death outcomes separately
+for POSIX and Windows. This difference is consistent with
+[libuv's Windows process implementation](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c):
+it assigns non-detached children to a kill-on-close job and does not set
+`CREATE_BREAKAWAY_FROM_JOB` for detached children. That source explains why the
+containing job's policy matters; **it is not a measurement of Desktop's policy**.
 
 ## Optional real Desktop experiment
 
@@ -165,8 +176,8 @@ result into the production ledger. Its hooks and local marketplace validate on
 The missing evidence is specifically **managed launcher → independent worker
 under actual Desktop teardown**, on each supported OS. Parent-exit survival is
 not that evidence. Windows job inheritance/breakaway is untested here. Even if
-that boundary passes, the reproduced worker-death orphan means a bare detached
-Node process does not meet the cleanup requirement.
+that boundary passes, the reproduced Linux worker-death orphan means a bare
+detached Node process does not meet the cleanup requirement on every supported OS.
 
 A viable implementation should put execution under an independent OS-supervised
 owner, with the plugin only an attaching client. That owner must enforce process

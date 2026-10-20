@@ -202,7 +202,7 @@ test('an unattended worker deadline stops its reviewer after the host has exited
   await p.stopped()
 })
 
-test('counterexample: killing the detached worker leaves its reviewer running', { timeout: 15000 }, async t => {
+test('POSIX counterexample: killing the detached worker leaves its reviewer running', { skip: process.platform === 'win32', timeout: 15000 }, async t => {
   const p = await setup(t)
   p.host.kill('SIGKILL')
   await p.exited
@@ -214,4 +214,13 @@ test('counterexample: killing the detached worker leaves its reviewer running', 
   assert.equal(await running(p.ready.reviewerPid), true)
   assert.equal(await optional(join(p.dir, 'result.json')), null)
   // t.after owns cleanup even if an assertion above fails.
+})
+
+test('Windows: killing the worker also terminates its attached fake reviewer', { skip: process.platform !== 'win32', timeout: 15000 }, async t => {
+  const p = await setup(t)
+  p.host.kill('SIGKILL')
+  await p.exited
+  process.kill(p.ready.pid, 'SIGKILL')
+  await p.stopped()
+  assert.equal(await optional(join(p.dir, 'result.json')), null)
 })
