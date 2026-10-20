@@ -166,6 +166,17 @@ describe('pane', () => {
     })
   }
 
+  test('shows a stopped run failed with its cause before its notice has saved it so', async ($, on) => {
+    const w = world(on)
+    const cause = 'This review stopped when /clear started a new conversation.'
+    w.seed([{ id: 'r1', reviewer: 'codex', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: null, status: 'running', response: null, verdict: null, findings: [], deniedSteps: [], failure: cause }])
+    await boot($, w)
+    const view = await $.ui.mount({ plugin: 'third-party-reviewers', surface: 'terminal', component: 'Pane', requestId: PANE, props: props('terminal') } as any)
+    const drawn = JSON.stringify(await view.drawn())
+    expect(drawn).toContain(`failed: ${cause}`)
+    expect(drawn).not.toContain('"running"')
+  })
+
   test('a refused instruction stores no overrule', async ($, on) => {
     const w = world(on, { dropPrompts: true })
     w.files.set(`${w.work}/a.ts`, 'one\nfunction add() {}\n')

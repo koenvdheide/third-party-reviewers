@@ -402,11 +402,11 @@ async function cancelRun(id: string): Promise<boolean> {
 }
 
 // A run as review_start and review_results return it.
-async function asResult($: Engine, run: Run): Promise<{ result: string }> {
-  const now = await $.clock.now()
+async function asResult($: Engine, stored: Run): Promise<{ result: string }> {
+  const run = shown(stored)
   const extra = run.status === 'running'
-    ? { elapsedMs: now - run.startedAt, activity: progress.get(run.id)?.activity ?? 'starting' }
-    : { durationMs: (run.endedAt ?? now) - run.startedAt }
+    ? { elapsedMs: (await $.clock.now()) - run.startedAt, activity: progress.get(run.id)?.activity ?? 'starting' }
+    : run.endedAt === null ? {} : { durationMs: run.endedAt - run.startedAt }
   return { result: JSON.stringify({ ...run, ...extra }, null, 2) }
 }
 
@@ -429,6 +429,12 @@ async function announce($: Engine, settled: Promise<Run>, gen: number): Promise<
 // and whose conversation has not been told yet. It stays running in the ledger until a notice
 // naming it has entered, so every path that sends none leaves it for the next resume or reload.
 const isStopped = (r: Run) => r.status === 'running' && !stoppers.has(r.id)
+// The cause marks a stopped run: a review_start still starting has a running row with no failure
+// until its stopper is in place.
+const awaitsNotice = (r: Run) => isStopped(r) && r.failure !== null
+// A run as the tools and the pane show it: a stopped one reads failed, with its cause and no end
+// time. Only its notice's save stores it failed, so a read acknowledges nothing.
+const shown = (r: Run): Run => (awaitsNotice(r) ? { ...r, status: 'failed' } : r)
 
 // Gives each stopped run that has no cause this one, in `$.state`. The first cause recorded stays,
 // so a retry reports what first stopped the run. A stopped Gemini run's directory goes too, because
@@ -462,9 +468,7 @@ async function reportStopped($: Engine, sessionId: string, gen: number): Promise
       if (waited >= BIND_WAIT_MS) return
       await $.clock.sleep(BIND_POLL_MS)
     }
-    // The cause marks a stopped run: a review_start begun meanwhile has a running row with no
-    // failure until its stopper is in place.
-    const stopped = (await read($, runs)).filter(r => isStopped(r) && r.failure !== null)
+    const stopped = (await read($, runs)).filter(awaitsNotice)
     if (stopped.length === 0 || gen !== generation) return
     const names = stopped.map(r => `${NAME[r.reviewer]} ${r.mode} review ${r.id}`)
     const text = stopped
@@ -745,7 +749,7 @@ export const register: Register = on => {
     return { element: e.element }
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => paneTree($.ui.resolve(e), await read($, runs), await read($, selected)))
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => paneTree($.ui.resolve(e), (await read($, runs)).map(shown), await read($, selected)))
 
   // The pane shows Claude's judgement; the user overrules it. The instruction goes as the
   // user's prompt, so Claude answers it, and the overrule is stored only once that prompt is

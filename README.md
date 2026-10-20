@@ -68,7 +68,7 @@ It writes no other file, and none of your build, settings or instructions files.
 - When the codex or antigravity skill loads while its CLI is missing, it adds the discovery error to the skill's text, so Claude tells you (and offers the other reviewer, if that one is available).
 - Above the prompt, it adds `review` (and `findings` once there is a review) beside whatever Claude Code and other plugins draw there, and gives the row back while Claude Code shows a survey in it.
 - While a review runs, the status line shows its reviewer, mode, elapsed time and current step. Short notices report a review starting and problems outside a review's result, such as a failed cleanup.
-- When a session starts it trims the store. On a resume it restores that conversation's reviews. When a conversation ends (`/clear` included) the plugin stops the reviews still running. A review stopped that way, or by a reload, is named in one message once its conversation is back, and then reads `failed` with what stopped it.
+- When a session starts it trims the store. On a resume it restores that conversation's reviews. When a conversation ends (`/clear` included) the plugin stops the reviews still running. A review stopped that way, or by a reload, is named in one message once its conversation is back, and reads `failed` with what stopped it.
 
 ## Troubleshooting
 

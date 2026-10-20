@@ -444,8 +444,9 @@ describe('resume', () => {
     expect((await resultOf($, done)).findings[0].status).toBe('applied')
     // Nothing draws here, so no notice is sent and the run stays running for the next resume.
     const stopped = await resultOf($, running)
-    expect(stopped.status).toBe('running')
+    expect(stopped.status).toBe('failed')
     expect(stopped.failure).toBe(ENDED_BY.clear)
+    expect(storedRun(w, running).status).toBe('running')
     expect((await call($, 'review_results', { runId: other })).deny).toContain('no run')
     // Compaction keeps the conversation, so the store is not read back.
     w.store.delete('runs:s1')
@@ -915,6 +916,25 @@ describe('stopped runs', () => {
     await w.clock.settle()
     expect(storedRun(w, 'r1').status).toBe('failed')
     expect(storedRun(w, 'r2').findings[0].status).toBe('applied')
+  })
+
+  test('a stopped run reads failed with its cause while the notice is held, and reading it acknowledges nothing', async ($, on) => {
+    const w = world(on, { holdPrompts: true })
+    w.surfaces = ['desktop']
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    await resume($, w)
+    const r = await resultOf($, 'r1')
+    expect(r.status).toBe('failed')
+    expect(r.failure).toBe(UNRECORDED)
+    expect(['elapsedMs', 'activity', 'durationMs'].filter(k => k in r)).toEqual([])
+    expect((await call($, 'review_cancel', { runId: 'r1' })).deny).toBe('r1 is not running.')
+    expect(storedRun(w, 'r1').status).toBe('running')
+    expect((w.runs() as any[])[0].status).toBe('running')
+    w.held.shift()?.({})
+    await w.clock.settle()
+    expect(storedRun(w, 'r1').status).toBe('failed')
+    expect(typeof (await resultOf($, 'r1')).durationMs).toBe('number')
   })
 
   test('a cancelled run is not reported on resume', async ($, on) => {
