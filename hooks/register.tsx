@@ -55,6 +55,20 @@ const cancelled = new Set<string>()
 // /clear ended never delivers into the next conversation.
 let generation = 0
 let ticker: { cancel: () => void } | null = null
+// The runs whose end Claude has read with review_results.
+const seen = new Set<string>()
+// The main conversation's model turn while one runs, and what waits for its end.
+let runningTurn: string | null = null
+const afterTurn: (() => void)[] = []
+
+// The engine delivers a plugin's message once the session is idle, after the turn in progress, in
+// which Claude may read the runs it names. So a message waits for that turn to end and leaves out
+// the runs read by then; a module loaded mid-turn never saw the turn start and sends at once.
+const turnEnded = () => (runningTurn === null ? Promise.resolve() : new Promise<void>(resolve => afterTurn.push(resolve)))
+const releaseTurn = () => {
+  runningTurn = null
+  afterTurn.splice(0).forEach(resolve => resolve())
+}
 
 async function probe($: Engine, exe: Exe, args: string[]): Promise<string> {
   const r = await $.process.run([...exe.argv, ...args], { timeoutMs: 30_000, env: exe.env })
@@ -411,11 +425,12 @@ async function asResult($: Engine, stored: Run): Promise<{ result: string }> {
 }
 
 // The plugin's message to the conversation that started a review, once the review ends; a run
-// that was cancelled, or whose conversation ended, gets none.
+// that was cancelled, whose conversation ended, or that Claude has read gets none.
 async function announce($: Engine, settled: Promise<Run>, gen: number): Promise<void> {
   const { id } = await settled
+  await turnEnded()
   const run = (await read($, runs)).find(r => r.id === id)
-  if (gen !== generation || run === undefined || run.status === 'running' || run.status === 'cancelled') return
+  if (gen !== generation || run === undefined || run.status === 'running' || run.status === 'cancelled' || seen.has(run.id)) return
   const name = `${NAME[run.reviewer]} ${run.mode} review ${run.id}`
   const n = run.findings.length
   const end = run.status === 'complete'
@@ -427,13 +442,14 @@ async function announce($: Engine, settled: Promise<Run>, gen: number): Promise<
 
 // A run whose child went with its conversation's process or with the module a reload replaced,
 // and whose conversation has not been told yet. It stays running in the ledger until a notice
-// naming it has entered, so every path that sends none leaves it for the next resume or reload.
+// naming it has entered or Claude has read it, so every other path leaves it for the next resume
+// or reload.
 const isStopped = (r: Run) => r.status === 'running' && !stoppers.has(r.id)
 // The cause marks a stopped run: a review_start still starting has a running row with no failure
 // until its stopper is in place.
 const awaitsNotice = (r: Run) => isStopped(r) && r.failure !== null
 // A run as the tools and the pane show it: a stopped one reads failed, with its cause and no end
-// time. Only its notice's save stores it failed, so a read acknowledges nothing.
+// time. Only reportStopped's save stores it failed, so a read changes no row.
 const shown = (r: Run): Run => (awaitsNotice(r) ? { ...r, status: 'failed' } : r)
 
 // Gives each stopped run that has no cause this one, in `$.state`. The first cause recorded stays,
@@ -468,16 +484,20 @@ async function reportStopped($: Engine, sessionId: string, gen: number): Promise
       if (waited >= BIND_WAIT_MS) return
       await $.clock.sleep(BIND_POLL_MS)
     }
+    await turnEnded()
     const stopped = (await read($, runs)).filter(awaitsNotice)
     if (stopped.length === 0 || gen !== generation) return
-    const names = stopped.map(r => `${NAME[r.reviewer]} ${r.mode} review ${r.id}`)
-    const text = stopped
-      .map((r, i) => `${names[i]} did not finish. ${r.failure} Read it with review_results ${r.id}, and start it again with review_start if it is still needed.`)
-      .join('\n\n')
-    const sent = await $.prompt.submit({ text }).catch((err: unknown) => ({ drop: String(err) }))
-    if (sent.drop !== undefined) {
-      $.ui.toast(`${names.join(', ')} did not finish; ask Claude to read ${stopped.length === 1 ? 'it' : 'them'} with review_results.`)
-      return
+    const unread = stopped.filter(r => !seen.has(r.id))
+    if (unread.length > 0) {
+      const names = unread.map(r => `${NAME[r.reviewer]} ${r.mode} review ${r.id}`)
+      const text = unread
+        .map((r, i) => `${names[i]} did not finish. ${r.failure} Read it with review_results ${r.id}, and start it again with review_start if it is still needed.`)
+        .join('\n\n')
+      const sent = await $.prompt.submit({ text }).catch((err: unknown) => ({ drop: String(err) }))
+      if (sent.drop !== undefined) {
+        $.ui.toast(`${names.join(', ')} did not finish; ask Claude to read ${unread.length === 1 ? 'it' : 'them'} with review_results.`)
+        return
+      }
     }
     if (gen !== generation || (await $.session.id()) !== sessionId) return
     const endedAt = await $.clock.now()
@@ -510,8 +530,11 @@ async function endSession($: Engine): Promise<void> {
   progress.clear()
   ticker?.cancel()
   ticker = null
+  // A turn the ending conversation left running would hold the next conversation's messages.
+  releaseTurn()
   await Promise.allSettled(stops.map(stop => stop()))
   $.ui.status(undefined)
+  seen.clear()
   await update($, runs, () => [])
   await update($, selected, () => null)
   await update($, picker, () => null)
@@ -535,7 +558,7 @@ async function registerTools($: Engine, i: Installed): Promise<void> {
   const names = reviewers.map(r => NAME[r]).join(' or ')
   await $.tool.register({
     name: 'review_start',
-    description: `Start an independent review by ${names}. Returns the run at once while the reviewer works; when it ends, the plugin sends a message naming the run: read the result then with review_results, without polling. A review stopped by the end of the conversation's process or by a plugin reload is named in a message once the conversation is back. Where nothing draws, as in a -p run, the call waits and returns the result; a desktop app session gets the run at once. Read the codex or antigravity skill and its required skills/review-guide.md for mode instructions and handling findings; the provider skill supplies execution and recovery rules.`,
+    description: `Start an independent review by ${names}. Returns the run at once while the reviewer works; when it ends, the plugin sends a message naming the run, none if you have already read its result with review_results: read the result then with review_results, without polling. A review stopped by the end of the conversation's process or by a plugin reload is named in a message once the conversation is back, by the same rule. Where nothing draws, as in a -p run, the call waits and returns the result; a desktop app session gets the run at once. Read the codex or antigravity skill and its required skills/review-guide.md for mode instructions and handling findings; the provider skill supplies execution and recovery rules.`,
     inputSchema: {
       type: 'object',
       required: ['reviewer', 'mode', 'question', 'instructions', 'artifact'],
@@ -631,6 +654,16 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('turn.start', ($, e, next) => {
+    runningTurn = e.turnId
+    return next(e)
+  })
+
+  on('turn.complete', ($, e, next) => {
+    if (e.turnId === runningTurn) releaseTurn()
+    return next(e)
+  })
+
   on('skill.prompt', async ($, e, next) => {
     // `skill.prompt` carries the plugin-qualified name.
     const reviewer: Reviewer | null = e.skill === 'third-party-reviewers:codex' ? 'codex' : e.skill === 'third-party-reviewers:antigravity' ? 'gemini' : null
@@ -682,11 +715,16 @@ export const register: Register = on => {
     return result
   })
 
-  on('tool.call', { tool: T('review_results') }, async ($, e) => {
+  on('tool.call', { tool: T('review_results') }, async ($, e, next) => {
     const { runId } = e as unknown as { runId: string }
     const run = (await read($, runs)).find(r => r.id === runId)
     if (!run) return { deny: `There is no run ${runId} in this conversation.` }
-    return asResult($, run)
+    const result = await asResult($, run)
+    // Only an answer the main conversation gets counts: a subagent's stays in its own loop, and an
+    // aborted dispatch's reaches no one.
+    const ended = run.status !== 'running' || awaitsNotice(run)
+    if (ended && e.agentId === undefined && !next.signal.aborted) seen.add(run.id)
+    return result
   })
 
   on('tool.call', { tool: T('review_record') }, async ($, e) => {

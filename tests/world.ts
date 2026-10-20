@@ -180,6 +180,8 @@ export function world(on: On, opts: { windows?: boolean; codex?: boolean; native
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.end', ($, e) => ({ sessionId: e.sessionId }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
   on('classic.SessionStart', () => ({}))
   on('skill.prompt', ($, e) => ({ text: e.text }))
   return w

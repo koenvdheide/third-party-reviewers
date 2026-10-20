@@ -31,6 +31,8 @@ const resume = async ($: any, w: any) => {
   await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
   await w.clock.settle()
 }
+const startTurn = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
+const endTurn = ($: any) => $.turn.complete({ answer: '', durationMs: 0, isAborted: false, turnId: 't1', reason: 'answer' })
 
 describe('runs', () => {
   for (const windows of [false, true]) {
@@ -279,6 +281,55 @@ describe('background', () => {
     expect(w.submitted).toEqual([`Codex red-team review ${r.id} finished: "v", 2 findings. Read it with review_results ${r.id}.`])
     expect(w.origins[0]).toMatchObject({ kind: 'plugin', name: 'third-party-reviewers' })
     expect((w.origins[0] as { asUser?: boolean }).asUser).toBe(undefined)
+  })
+
+  test('a run that ends mid-turn and that Claude reads in that turn gets no message', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true, lines: codexReview([finding({})]) })
+    await boot($, w)
+    await startTurn($)
+    const id = await startOf($)
+    w.waiting.shift()?.()
+    await w.clock.settle()
+    expect((await resultOf($, id)).status).toBe('complete')
+    await endTurn($)
+    await w.clock.settle()
+    expect(w.submitted).toEqual([])
+  })
+
+  test("a subagent's read of a run that ends mid-turn leaves the main conversation its message", async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true, lines: codexReview([]) })
+    await boot($, w)
+    await startTurn($)
+    const id = await startOf($)
+    w.waiting.shift()?.()
+    await w.clock.settle()
+    expect(JSON.parse((await call($, 'review_results', { runId: id, agentId: 'a1' })).result).status).toBe('complete')
+    await endTurn($)
+    await w.clock.settle()
+    expect(w.submitted).toEqual([`Codex red-team review ${id} finished: "v", 0 findings. Read it with review_results ${id}.`])
+  })
+
+  test('a run that ends mid-turn gets its message when the turn ends, though Claude read it while it ran', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true, lines: codexReview([]) })
+    await boot($, w)
+    await startTurn($)
+    const id = await startOf($)
+    expect((await resultOf($, id)).status).toBe('running')
+    w.waiting.shift()?.()
+    await w.clock.settle()
+    // A subagent's turn ending is not the main turn's.
+    await $.turn.complete({ answer: '', durationMs: 0, isAborted: false, turnId: 'sub', reason: 'answer' })
+    await w.clock.settle()
+    expect(w.submitted).toEqual([])
+    await endTurn($)
+    await w.clock.settle()
+    expect(w.submitted).toEqual([`Codex red-team review ${id} finished: "v", 0 findings. Read it with review_results ${id}.`])
   })
 
   for (const { name, env, answer } of [
@@ -842,6 +893,37 @@ describe('stopped runs', () => {
     await boot($, w)
     await resume($, w)
     expect(w.submitted).toEqual([`${notice('r1', UNRECORDED)}\n\n${notice('r2', UNRECORDED, 'Gemini prose')}`])
+  })
+
+  for (const { read, sent } of [
+    { read: ['r1', 'r2'], sent: [] },
+    { read: ['r1'], sent: [notice('r2', UNRECORDED)] },
+  ]) {
+    test(`a notice due mid-turn leaves out the stopped runs Claude reads in that turn (${read.join(', ')} of r1, r2), and all are saved failed`, async ($, on) => {
+      const w = world(on)
+      w.surfaces = ['desktop']
+      w.store.set('runs:s1', { savedAt: 0, runs: [row(), row({ id: 'r2' })] })
+      await boot($, w)
+      await startTurn($)
+      await resume($, w)
+      for (const id of read) expect((await resultOf($, id)).failure).toBe(UNRECORDED)
+      expect(w.submitted).toEqual([])
+      await endTurn($)
+      await w.clock.settle()
+      expect(w.submitted).toEqual(sent)
+      expect([storedRun(w, 'r1').status, storedRun(w, 'r2').status]).toEqual(['failed', 'failed'])
+    })
+  }
+
+  test("a turn left running by a conversation's end does not hold the next notice", async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    await startTurn($)
+    await endSession($)
+    await resume($, w)
+    expect(w.submitted).toEqual([notice('r1', UNRECORDED)])
   })
 
   test('with nothing drawing, a stopped run is not reported and stays running in the store', async ($, on) => {

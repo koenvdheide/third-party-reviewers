@@ -49,7 +49,7 @@ The plugin is a mod, code that Claude Code runs. It has no server and makes no n
 ### What it sends, and where
 
 - The review prompt: the mode, the question, the instructions, any inline text and the paths of the files to review (for Gemini, the files' contents too), inside the plugin's own framing: the material marked as data, review checklists and the JSON format for the answer. The CLI sends it, and any file the reviewer reads, to the provider it is configured for (OpenAI or Google by default). Codex may also search the web.
-- A message to Claude, under the plugin's name, when a review ends: the reviewer, mode and run id, with the verdict and finding count or the failure. In a `-p` run the review's result comes back from `review_start` instead.
+- A message to Claude, under the plugin's name, when a review ends: the reviewer, mode and run id, with the verdict and finding count or the failure. A message that comes due during one of Claude's turns waits for that turn to end and leaves out any review whose result Claude has read with `review_results` by then, unless the plugin was reloaded during that turn. In a `-p` run the review's result comes back from `review_start` instead.
 - A prompt to Claude as you, only when you choose one of its buttons (by click or key):
   - A choice under `review` asks Claude to use the codex or antigravity skill to review whatever you are working on, either one round or through the review guide's convergence workflow (carrying earlier findings forward and stopping for blockers), and to name the target and question in one line first.
   - Apply, Reject or Withdraw in the findings pane sends a one-line instruction about that finding: make and record the fix, leave it and undo any fix, or go back to Claude's own judgement.
@@ -68,7 +68,7 @@ It writes no other file, and none of your build, settings or instructions files.
 - When the codex or antigravity skill loads while its CLI is missing, it adds the discovery error to the skill's text, so Claude tells you (and offers the other reviewer, if that one is available).
 - Above the prompt, it adds `review` (and `findings` once there is a review) beside whatever Claude Code and other plugins draw there, and gives the row back while Claude Code shows a survey in it.
 - While a review runs, the status line shows its reviewer, mode, elapsed time and current step. Short notices report a review starting and problems outside a review's result, such as a failed cleanup.
-- When a session starts it trims the store. On a resume it restores that conversation's reviews. When a conversation ends (`/clear` included) the plugin stops the reviews still running. A review stopped that way, or by a reload, is named in one message once its conversation is back, and reads `failed` with what stopped it.
+- When a session starts it trims the store. On a resume it restores that conversation's reviews. When a conversation ends (`/clear` included) the plugin stops the reviews still running. A review stopped that way, or by a reload, reads `failed` with what stopped it, and is named in one message once its conversation is back unless Claude has already read it with `review_results`.
 
 ## Troubleshooting
 
