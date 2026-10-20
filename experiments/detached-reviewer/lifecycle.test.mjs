@@ -118,7 +118,7 @@ async function setup(t, mode = 'hold', lifetime = 8000) {
   assert.equal(ready.jobId, jobId)
   const result = () => until(() => optional(join(dir, 'result.json')), 'durable result')
   const stopped = () => until(async () => !(await running(ready.pid)) && !(await running(ready.reviewerPid)), 'worker and reviewer exit')
-  return { dir, jobId, host, exited, ready, command, result, stopped }
+  return { dir, jobId, deadline, host, exited, ready, command, result, stopped }
 }
 
 for (const mode of ['exit', 'kill']) {
@@ -217,10 +217,11 @@ test('POSIX counterexample: killing the detached worker leaves its reviewer runn
 })
 
 test('Windows: killing the worker also terminates its attached fake reviewer', { skip: process.platform !== 'win32', timeout: 15000 }, async t => {
-  const p = await setup(t)
+  const p = await setup(t, 'hold', 12000)
   p.host.kill('SIGKILL')
   await p.exited
   process.kill(p.ready.pid, 'SIGKILL')
   await p.stopped()
+  assert.ok(Date.now() < p.deadline, 'worker-death cleanup must precede the fixture emergency deadline')
   assert.equal(await optional(join(p.dir, 'result.json')), null)
 })

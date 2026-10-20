@@ -94,10 +94,11 @@ Windows Job Object, containing cgroup, recursive descendant kill, or Desktop.
 The new-reader test is file recovery, not plugin result import or message delivery.
 Atomic rename gives complete-file visibility, not power-loss durability.
 
-The Windows CI run confirmed parent-exit survival, cancellation, recovery,
-deadline and host cleanup, but its reviewer stopped on worker death instead of
-remaining orphaned. The suite therefore asserts worker-death outcomes separately
-for POSIX and Windows. This difference is consistent with
+The first Windows CI run confirmed parent-exit survival, cancellation, recovery,
+deadline and host cleanup, but no reviewer heartbeat followed worker death.
+The suite therefore asserts worker-death outcomes separately for POSIX and
+Windows; the Windows assertion requires both processes to exit before the
+fixture's emergency deadline. This platform difference is consistent with
 [libuv's Windows process implementation](https://github.com/libuv/libuv/blob/v1.x/src/win/process.c):
 it assigns non-detached children to a kill-on-close job and does not set
 `CREATE_BREAKAWAY_FROM_JOB` for detached children. That source explains why the
