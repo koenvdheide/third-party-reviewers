@@ -31,3 +31,5 @@ jobs:
         run: |
           claude --version
           claude plugin test .
+      - name: Run OS process lifetime experiment (not a Desktop test)
+        run: node --test experiments/detached-reviewer/lifecycle.test.mjs

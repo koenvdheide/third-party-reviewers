@@ -75,6 +75,7 @@ It writes no other file, and none of your build, settings or instructions files.
 - No `review` above the prompt: Claude Code draws it only in the terminal and the Desktop app's Code tab, and claude.ai chat and Cowork load no mods. In a terminal, run `/plugin` and check that its `mods active` line names third-party-reviewers. If it doesn't, update Claude Code to v2.1.287 or later and check that `disableAllHooks` or `--safe-mode` isn't stopping mods.
 - A reviewer is missing under `review`, or Claude says its CLI is unavailable: run `codex --version` or `agy models` in a terminal, install or sign in until that works, then start a new session. The plugin looks for the CLIs when a session starts.
 - A review fails: Claude reports the failure, including the CLI's own error when it printed one, such as a sign-in or usage-limit message. Fix the cause it names, then ask again.
+- Reviews still stop when their conversation ends or the plugin reloads. The [detached-worker investigation](experiments/detached-reviewer/README.md) includes a process-lifetime prototype, its cleanup limitation, and an optional Desktop probe; it does not enable detached reviews.
 
 ## License
 

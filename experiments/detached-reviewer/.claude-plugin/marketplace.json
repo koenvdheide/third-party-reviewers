@@ -1,0 +1,12 @@
+{
+  "name": "detach-lifetime-experiment",
+  "metadata": { "description": "Opt-in fake-worker lifetime experiment, separate from production reviews" },
+  "owner": { "name": "Koen van der Heide" },
+  "plugins": [
+    {
+      "name": "detach-lifetime-probe",
+      "source": "./desktop-probe",
+      "description": "Disposable fake-worker lifetime probe; no reviewer CLI or provider calls"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "detach-lifetime-probe",
+  "version": "0.0.0",
+  "author": { "name": "Koen van der Heide" },
+  "description": "Explicitly started, bounded fake-worker experiment, separate from third-party-reviewers",
+  "userConfig": {
+    "jobDirectory": {
+      "type": "directory",
+      "title": "Prepared probe directory",
+      "description": "Absolute directory printed by node probe.mjs prepare; a new one for each experiment",
+      "default": ""
+    },
+    "nodeExecutable": {
+      "type": "string",
+      "title": "Node executable",
+      "description": "Absolute path to Node.js 24 or later",
+      "default": "node"
+    }
+  }
+}
