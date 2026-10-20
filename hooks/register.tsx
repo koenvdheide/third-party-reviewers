@@ -531,7 +531,7 @@ async function registerTools($: Engine, i: Installed): Promise<void> {
   const names = reviewers.map(r => NAME[r]).join(' or ')
   await $.tool.register({
     name: 'review_start',
-    description: `Start an independent review by ${names}. Returns the run at once while the reviewer works; when it ends, the plugin sends a message naming the run: read the result then with review_results, without polling. Where nothing draws, as in a -p run, the call waits and returns the result; a desktop app session gets the run at once. Read the codex or antigravity skill and its required skills/review-guide.md for mode instructions and handling findings; the provider skill supplies execution and recovery rules.`,
+    description: `Start an independent review by ${names}. Returns the run at once while the reviewer works; when it ends, the plugin sends a message naming the run: read the result then with review_results, without polling. A review stopped by the end of the conversation's process or by a plugin reload is named in a message once the conversation is back. Where nothing draws, as in a -p run, the call waits and returns the result; a desktop app session gets the run at once. Read the codex or antigravity skill and its required skills/review-guide.md for mode instructions and handling findings; the provider skill supplies execution and recovery rules.`,
     inputSchema: {
       type: 'object',
       required: ['reviewer', 'mode', 'question', 'instructions', 'artifact'],

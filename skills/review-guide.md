@@ -25,7 +25,7 @@ Call `review_start` following the selected provider's skill:
 
 The [prompt builder](../hooks/cli.ts) supplies mode-scoped data-only framing, ownership, simplicity and structured output rules. Keep those in the runtime; pass mode instructions and task context here.
 
-`review_start` returns the run at once; the plugin sends a message naming it when the review ends. Meanwhile end the turn or do other work without changing reviewed files. Where nothing draws (for example, `-p`), it waits and returns the result itself. Completion messages reach only the main conversation: a subagent or teammate hands its parent the run id and purpose, then stops. The main conversation reads results, disposes findings and owns further rounds.
+`review_start` returns the run at once; the plugin sends a message naming it when the review ends. If the conversation's Claude Code process ends or the plugin reloads first, the review stops; once the conversation is back, a message names it, and the run reads `failed` with what stopped it. Start it again if it is still needed. Meanwhile end the turn or do other work without changing reviewed files. Where nothing draws (for example, `-p`), it waits and returns the result itself. Completion messages reach only the main conversation: a subagent or teammate hands its parent the run id and purpose, then stops. The main conversation reads results, disposes findings and owns further rounds.
 
 ## Mode catalogue
 
