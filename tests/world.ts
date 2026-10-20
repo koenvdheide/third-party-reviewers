@@ -27,6 +27,9 @@ export function world(on: On, opts: { windows?: boolean; codex?: boolean; native
     // With holdStore on, each store write waits here until the test releases it.
     holdStore: false,
     heldStore: [] as (() => void)[],
+    // With holdRemove on, each directory removal waits here until the test releases it.
+    holdRemove: false,
+    heldRemove: [] as (() => void)[],
     scripts: [] as Script[],
     spawns: [] as { argv: readonly string[]; cwd?: string; input?: string }[],
     removed: [] as string[],
@@ -44,6 +47,9 @@ export function world(on: On, opts: { windows?: boolean; codex?: boolean; native
     surfaces: [] as RenderSurface[],
     // Each silent child waits here until the test lets it write its lines.
     waiting: [] as (() => void)[],
+    // With holdSurfaces on, each surface lookup waits here until the test releases it.
+    holdSurfaces: false,
+    heldSurfaces: [] as (() => void)[],
     // That many writes of the runs ledger are refused.
     failRunsWrites: 0,
     seed(runs: unknown[]) {
@@ -115,7 +121,10 @@ export function world(on: On, opts: { windows?: boolean; codex?: boolean; native
     return { value: work }
   })
   on('session.repo', () => ({ value: { root: work, remote: null, internal: false, name: null } }))
-  on('session.surfaces', () => ({ value: w.surfaces }))
+  on('session.surfaces', async () => {
+    if (w.holdSurfaces) await new Promise<void>(resolve => w.heldSurfaces.push(resolve))
+    return { value: w.surfaces }
+  })
   on('ui.toast', ($, e) => {
     w.toasts.push(e.text)
     return { value: undefined }
@@ -137,6 +146,7 @@ export function world(on: On, opts: { windows?: boolean; codex?: boolean; native
     if (cmd === 'agy models') return gemini ? ok('gemini-3.8-flash-high\tGemini 3.8 Flash (High)') : { deny: 'ENOENT: agy' }
     if (e.argv[0] === 'powershell.exe' || e.argv[0] === 'rm') {
       const dir = e.argv[0] === 'rm' ? e.argv[3] : e.init?.env?.TPR_DIR ?? ''
+      if (w.holdRemove) await new Promise<void>(resolve => w.heldRemove.push(resolve))
       w.removed.push(key(dir))
       if (opts.failRemove) return { value: { exitCode: 1, stdout: '', stderr: 'in use', isStdoutTruncated: false, isStderrTruncated: false } }
       inDir(key(dir)).forEach(f => files.delete(f))

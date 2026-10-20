@@ -22,6 +22,15 @@ const ENDED_BY = {
 }
 const REASONS = Object.keys(ENDED_BY) as (keyof typeof ENDED_BY)[]
 const storedRun = (w: any, id: string) => (w.store.get('runs:s1') as any).runs.find((r: any) => r.id === id)
+const UNRECORDED = `This review stopped before it finished, and nothing recorded what stopped it. ${PAUSES}`
+const RELOADED = "The plugin was loaded again while this review ran, which stopped it. Updating the plugin does this in the desktop app's open local sessions."
+const row = (o: Record<string, unknown> = {}) => ({ id: 'r1', reviewer: 'codex', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: null, status: 'running', response: null, verdict: null, findings: [], deniedSteps: [], failure: null, ...o })
+const notice = (id: string, cause: string, name = 'Codex red-team') =>
+  `${name} review ${id} did not finish. ${cause} Read it with review_results ${id}, and start it again with review_start if it is still needed.`
+const resume = async ($: any, w: any) => {
+  await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
+  await w.clock.settle()
+}
 
 describe('runs', () => {
   for (const windows of [false, true]) {
@@ -212,23 +221,6 @@ describe('runs', () => {
     await call($, 'review_start', { ...start, reviewer: 'gemini' })
     expect(w.removed.length).toBe(1)
     expect(w.toasts.some(t => t.startsWith('Could not delete'))).toBe(false)
-  })
-
-  test('a running row left by a reload is marked cancelled', async ($, on) => {
-    const w = world(on)
-    const row = { id: 'r1', reviewer: 'gemini', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: null, status: 'running', response: null, verdict: null, findings: [], deniedSteps: [], failure: null }
-    w.seed([row])
-    w.store.set('runs:s1', { savedAt: 0, runs: [row] })
-    await boot($, w)
-    const r = await resultOf($, 'r1')
-    expect(r.status).toBe('cancelled')
-    expect(r.failure).toContain('loaded again')
-    expect(r.failure).not.toContain('session ended')
-    expect(w.removed).toEqual([`${w.temp}/third-party-reviewers/r1`])
-    // A resume reads the stored ledger, so the reload's cause must have been saved there.
-    await endSession($)
-    await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
-    expect((await resultOf($, 'r1')).failure).toContain('loaded again')
   })
 
   test('a codex.exe on PATH runs directly', async ($, on) => {
@@ -429,7 +421,7 @@ describe('records', () => {
 })
 
 describe('resume', () => {
-  test('a resumed conversation gets its own reviews back, a running one cancelled', async ($, on) => {
+  test('a resumed conversation gets its own reviews back, a stopped one kept for its notice', async ($, on) => {
     const w = world(on)
     w.scripts.push({ lines: codexReview([finding({})]) }, { silent: true }, { lines: codexReview([]) })
     await boot($, w)
@@ -450,10 +442,10 @@ describe('resume', () => {
     w.sessionId = 's1'
     expect((w.store.get('runs:s2') as any).runs.map((r: any) => r.id)).toEqual([other])
     expect((await resultOf($, done)).findings[0].status).toBe('applied')
-    const cancelled = await resultOf($, running)
-    expect(cancelled.status).toBe('cancelled')
-    expect(cancelled.failure).toContain('session ended')
-    expect(cancelled.failure).not.toContain('loaded again')
+    // Nothing draws here, so no notice is sent and the run stays running for the next resume.
+    const stopped = await resultOf($, running)
+    expect(stopped.status).toBe('running')
+    expect(stopped.failure).toBe(ENDED_BY.clear)
     expect((await call($, 'review_results', { runId: other })).deny).toContain('no run')
     // Compaction keeps the conversation, so the store is not read back.
     w.store.delete('runs:s1')
@@ -529,10 +521,10 @@ describe('resume', () => {
 
   test('a reload cleanup that a resume overtakes saves nothing under the conversation left', async ($, on) => {
     const w = world(on)
-    const row = { id: 'r1', reviewer: 'codex', mode: 'red-team', model: 'm', effort: 'high', targets: [], startedAt: 0, endedAt: null, status: 'running', response: null, verdict: null, findings: [], deniedSteps: [], failure: null }
-    w.seed([row])
-    w.store.set('runs:s1', { savedAt: 0, runs: [row] })
-    w.store.set('runs:s2', { savedAt: 0, runs: [{ ...row, id: 'r2', status: 'complete' }] })
+    const stopped = row()
+    w.seed([stopped])
+    w.store.set('runs:s1', { savedAt: 0, runs: [stopped] })
+    w.store.set('runs:s2', { savedAt: 0, runs: [{ ...stopped, id: 'r2', status: 'complete' }] })
     w.holdWrites = true
     const started = boot($, w)
     await w.clock.settle()
@@ -760,5 +752,309 @@ describe('conversation end', () => {
     await Promise.all([cancelling, ended])
     await w.clock.settle()
     expect(storedRun(w, id).status).toBe('cancelled')
+  })
+})
+
+describe('stopped runs', () => {
+  for (const reason of REASONS) {
+    const cause = ENDED_BY[reason]
+    test(`a run a ${reason} end stopped is reported once on resume, then saved failed`, async ($, on) => {
+      const w = world(on)
+      w.surfaces = ['desktop']
+      w.scripts.push({ silent: true })
+      await boot($, w)
+      const id = await startOf($)
+      await $.session.end({ reason, sessionId: 's1', resume: { id: 's1' } })
+      await resume($, w)
+      expect(w.submitted).toEqual([notice(id, cause)])
+      const r = await resultOf($, id)
+      expect(r.status).toBe('failed')
+      expect(r.failure).toBe(cause)
+      expect(storedRun(w, id).status).toBe('failed')
+      await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
+      await resume($, w)
+      expect(w.submitted.length).toBe(1)
+    })
+  }
+
+  test('a run with no recorded end is reported with the unrecorded cause', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    await resume($, w)
+    expect(w.submitted).toEqual([notice('r1', UNRECORDED)])
+    expect(storedRun(w, 'r1').status).toBe('failed')
+    expect(storedRun(w, 'r1').failure).toBe(UNRECORDED)
+  })
+
+  test('a new process resuming reports a stopped run once, with its recorded cause', async ($, on) => {
+    const w = world(on, { holdPrompts: true })
+    w.surfaces = ['desktop']
+    w.store.set('runs:s1', { savedAt: 0, runs: [row({ failure: ENDED_BY.other })] })
+    await $.classic.SessionStart({ source: 'resume', session_id: 's1' })
+    await boot($, w)
+    w.held.splice(0).forEach(answer => answer({}))
+    await w.clock.settle()
+    expect(w.submitted).toEqual([notice('r1', ENDED_BY.other)])
+    expect(storedRun(w, 'r1').status).toBe('failed')
+  })
+
+  test('a run a reload stopped is reported with the reload cause, then saved failed', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.seed([row({ reviewer: 'gemini' })])
+    w.store.set('runs:s1', { savedAt: 0, runs: [row({ reviewer: 'gemini' })] })
+    await boot($, w)
+    await w.clock.settle()
+    expect(w.submitted).toEqual([notice('r1', RELOADED, 'Gemini red-team')])
+    const r = await resultOf($, 'r1')
+    expect(r.status).toBe('failed')
+    expect(r.failure).toBe(RELOADED)
+    expect(w.removed).toEqual([`${w.temp}/third-party-reviewers/r1`])
+    await endSession($)
+    await resume($, w)
+    expect((await resultOf($, 'r1')).failure).toBe(RELOADED)
+    expect(w.submitted.length).toBe(1)
+  })
+
+  test('a reload cause is saved before its Gemini cleanup, so an end during the cleanup keeps it', async ($, on) => {
+    const w = world(on)
+    w.seed([row({ reviewer: 'gemini' })])
+    w.store.set('runs:s1', { savedAt: 0, runs: [row({ reviewer: 'gemini' })] })
+    w.holdRemove = true
+    const started = boot($, w)
+    await w.clock.settle()
+    await endSession($)
+    w.holdRemove = false
+    w.heldRemove.splice(0).forEach(release => release())
+    await started
+    await w.clock.settle()
+    expect(storedRun(w, 'r1').failure).toBe(RELOADED)
+    expect(storedRun(w, 'r1').status).toBe('running')
+  })
+
+  test('several stopped runs share one message, a paragraph each', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.store.set('runs:s1', { savedAt: 0, runs: [row(), row({ id: 'r2', reviewer: 'gemini', mode: 'prose' })] })
+    await boot($, w)
+    await resume($, w)
+    expect(w.submitted).toEqual([`${notice('r1', UNRECORDED)}\n\n${notice('r2', UNRECORDED, 'Gemini prose')}`])
+  })
+
+  test('with nothing drawing, a stopped run is not reported and stays running in the store', async ($, on) => {
+    const w = world(on)
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    await resume($, w)
+    expect(w.submitted).toEqual([])
+    expect(storedRun(w, 'r1').status).toBe('running')
+  })
+
+  test("with nothing drawing, a stopped Gemini run's directory is removed while it waits for its notice", async ($, on) => {
+    const w = world(on)
+    w.store.set('runs:s1', { savedAt: 0, runs: [row({ reviewer: 'gemini' })] })
+    await boot($, w)
+    await resume($, w)
+    expect(w.removed).toEqual([`${w.temp}/third-party-reviewers/r1`])
+    expect(storedRun(w, 'r1').status).toBe('running')
+  })
+
+  test("a dropped notice still removes a stopped Gemini run's directory", async ($, on) => {
+    const w = world(on, { dropPrompts: true })
+    w.surfaces = ['desktop']
+    w.store.set('runs:s1', { savedAt: 0, runs: [row({ reviewer: 'gemini' })] })
+    await boot($, w)
+    await resume($, w)
+    expect(w.removed).toEqual([`${w.temp}/third-party-reviewers/r1`])
+    expect(storedRun(w, 'r1').status).toBe('running')
+  })
+
+  test('a dropped notice leaves the run running, and a reload reports it with its first cause', async ($, on) => {
+    const opts = { dropPrompts: true }
+    const w = world(on, opts)
+    w.surfaces = ['desktop']
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    await resume($, w)
+    expect(w.submitted).toEqual([])
+    expect(w.toasts).toContain('Codex red-team review r1 did not finish; ask Claude to read it with review_results.')
+    expect(storedRun(w, 'r1').status).toBe('running')
+    opts.dropPrompts = false
+    await boot($, w)
+    await w.clock.settle()
+    expect(w.submitted).toEqual([notice('r1', UNRECORDED)])
+  })
+
+  test('a reload whose notice was dropped keeps the reload cause through a /clear and a resume', async ($, on) => {
+    const opts = { dropPrompts: true }
+    const w = world(on, opts)
+    w.surfaces = ['desktop']
+    w.seed([row()])
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    await w.clock.settle()
+    expect(w.submitted).toEqual([])
+    await endSession($)
+    opts.dropPrompts = false
+    await resume($, w)
+    expect(w.submitted).toEqual([notice('r1', RELOADED)])
+  })
+
+  test('a save made while the notice is held does not acknowledge the stopped run', async ($, on) => {
+    const w = world(on, { holdPrompts: true })
+    w.surfaces = ['desktop']
+    const done = row({ id: 'r2', status: 'complete', endedAt: 1, verdict: 'v', response: 'r', findings: [{ id: 'r2.1', severity: 'breakage', title: 'op', claim: 'c', file: null, line: null, symbol: null, citation: 'no-location', status: 'unresolved', evidence: null, overrule: null }] })
+    w.store.set('runs:s1', { savedAt: 0, runs: [row(), done] })
+    await boot($, w)
+    await resume($, w)
+    await call($, 'review_record', { findingId: 'r2.1', status: 'applied', evidence: 'fixed' })
+    expect(storedRun(w, 'r1').status).toBe('running')
+    w.held.shift()?.({})
+    await w.clock.settle()
+    expect(storedRun(w, 'r1').status).toBe('failed')
+    expect(storedRun(w, 'r2').findings[0].status).toBe('applied')
+  })
+
+  test('a cancelled run is not reported on resume', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true })
+    await boot($, w)
+    const id = await startOf($)
+    await call($, 'review_cancel', { runId: id })
+    await w.clock.settle()
+    await endSession($)
+    await resume($, w)
+    expect(w.submitted).toEqual([])
+    expect((await resultOf($, id)).status).toBe('cancelled')
+  })
+
+  test('an in-process resume sends and saves nothing until the session names the resumed conversation', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.sessionId = 's2'
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    await $.session.end({ reason: 'resume', sessionId: 's2', resume: { id: 's2' } })
+    // As in Claude Code, the session id names the conversation left until the resume hook is done.
+    await resume($, w)
+    expect(w.submitted).toEqual([])
+    w.sessionId = 's1'
+    await w.clock.advance(250)
+    expect(w.submitted).toEqual([notice('r1', UNRECORDED)])
+    expect(storedRun(w, 'r1').status).toBe('failed')
+    expect(w.store.has('runs:s2')).toBe(false)
+  })
+
+  test('a conversation left again before its notice is bound sends nothing and keeps the run', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.sessionId = 's2'
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    await $.session.end({ reason: 'resume', sessionId: 's2', resume: { id: 's2' } })
+    await resume($, w)
+    await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
+    w.sessionId = 's1'
+    await w.clock.advance(250)
+    expect(w.submitted).toEqual([])
+    expect(storedRun(w, 'r1').status).toBe('running')
+  })
+
+  test('leaving again while the notice is held keeps the first cause for the next resume', async ($, on) => {
+    const w = world(on, { holdPrompts: true })
+    w.surfaces = ['desktop']
+    w.store.set('runs:s1', { savedAt: 0, runs: [row({ failure: ENDED_BY.clear })] })
+    await boot($, w)
+    await resume($, w)
+    // A live run makes the end rewrite the store, which must leave the row it did not stop alone.
+    w.scripts.push({ silent: true })
+    const live = await startOf($)
+    await $.session.end({ reason: 'other', sessionId: 's1', resume: { id: 's1' } })
+    w.held.shift()?.({})
+    await w.clock.settle()
+    expect(storedRun(w, 'r1').status).toBe('running')
+    expect(storedRun(w, 'r1').failure).toBe(ENDED_BY.clear)
+    expect(storedRun(w, live).failure).toBe(ENDED_BY.other)
+    await resume($, w)
+    w.held.shift()?.({})
+    await w.clock.settle()
+    // At least once: the first notice entered but was never acknowledged, so it comes again.
+    expect(w.submitted).toEqual([notice('r1', ENDED_BY.clear), `${notice('r1', ENDED_BY.clear)}\n\n${notice(live, ENDED_BY.other)}`])
+    expect(storedRun(w, 'r1').status).toBe('failed')
+    expect(storedRun(w, live).status).toBe('failed')
+  })
+
+  test('a report whose eligibility check outlives an end and a new resume sends nothing; the new one sends once', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    w.holdSurfaces = true
+    await resume($, w)
+    await $.session.end({ reason: 'other', sessionId: 's1', resume: { id: 's1' } })
+    await resume($, w)
+    w.holdSurfaces = false
+    w.heldSurfaces.splice(0).forEach(release => release())
+    await w.clock.settle()
+    expect(w.submitted).toEqual([notice('r1', UNRECORDED)])
+    expect(storedRun(w, 'r1').status).toBe('failed')
+  })
+
+  test('a review started while the notice waits is not taken for a stopped one', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.sessionId = 's2'
+    w.scripts.push({ silent: true })
+    w.store.set('runs:s1', { savedAt: 0, runs: [row()] })
+    await boot($, w)
+    await $.session.end({ reason: 'resume', sessionId: 's2', resume: { id: 's2' } })
+    await resume($, w)
+    w.sessionId = 's1'
+    // The new run's row is in $.state, but its first save, and so its stopper, wait.
+    w.holdStore = true
+    const pending = call($, 'review_start', start)
+    await w.clock.settle()
+    await w.clock.advance(250)
+    expect(w.submitted).toEqual([notice('r1', UNRECORDED)])
+    w.holdStore = false
+    w.heldStore.splice(0).forEach(release => release())
+    const id = JSON.parse((await pending).result).id
+    await w.clock.settle()
+    expect((await resultOf($, id)).status).toBe('running')
+    expect((await resultOf($, 'r1')).status).toBe('failed')
+    await endSession($)
+  })
+
+  test('a recovery held across an end leaves a review started in the next conversation alone', async ($, on) => {
+    const w = world(on)
+    w.surfaces = ['desktop']
+    w.scripts.push({ silent: true })
+    await boot($, w)
+    w.seed([row({ reviewer: 'gemini' })])
+    w.store.set('runs:s1', { savedAt: 0, runs: [row({ reviewer: 'gemini' })] })
+    w.holdWrites = true
+    const reloaded = boot($, w)
+    for (let i = 0; i < 50 && w.heldWrites.length < 1; i++) await w.clock.advance(0)
+    w.holdWrites = false
+    await $.session.end({ reason: 'resume', sessionId: 's1', resume: { id: 's1' } })
+    w.sessionId = 's2'
+    await $.classic.SessionStart({ source: 'resume', session_id: 's2' })
+    // The new run's row is in $.state, but its first save, and so its stopper, wait.
+    w.holdStore = true
+    const pending = call($, 'review_start', { ...start, reviewer: 'gemini' })
+    await w.clock.settle()
+    const id = w.runs()[0].id
+    w.heldWrites.splice(0).forEach(release => release())
+    await w.clock.settle()
+    expect((w.runs() as any[]).find(r => r.id === id).failure).toBeNull()
+    expect(w.removed).not.toContain(`${w.temp}/third-party-reviewers/${id}`)
+    w.holdStore = false
+    w.heldStore.splice(0).forEach(release => release())
+    await pending
+    await reloaded
+    await endSession($)
   })
 })

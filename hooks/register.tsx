@@ -139,7 +139,7 @@ async function runDirOf($: Engine, id: string): Promise<string> {
 }
 
 // Every ledger change saved to the store goes through here except an ended conversation's, which
-// rewriteStored writes; restore, markOrphans and the session-end wipe write `$.state` only. Changes
+// rewriteStored writes; restore, recoverStopped and the session-end wipe write `$.state` only. Changes
 // queue, each stored with the ledger it wrote, so the store holds them in order; a dispatch's own
 // reads would see only its moment. One made before the conversation changed is dropped, on each
 // of update's retries too, so it never lands in, or under the key of, another conversation.
@@ -165,7 +165,9 @@ async function restore($: Engine, sessionId: string): Promise<void> {
   await saving
   const saved = (await $.store.get(savedKey(sessionId))) as Saved | undefined
   await update($, runs, () => saved?.runs ?? [])
-  await markOrphans($, LEFT)
+  // `$.state` only: during an in-process /resume `$.session.id()` still names the conversation left
+  // behind, so a store write would land under its key; the report saves once it names this one.
+  if (await recoverStopped($, UNRECORDED, generation)) void reportStopped($, sessionId, generation)
 }
 
 // Rewrites a conversation's stored ledger by its id, queued behind every ledger write already
@@ -423,24 +425,67 @@ async function announce($: Engine, settled: Promise<Run>, gen: number): Promise<
   if (sent.drop !== undefined) $.ui.toast(`${name} has ended; ask Claude to read it with review_results ${run.id}.`)
 }
 
-// After a reload the children are gone with the old module, but `$.state` keeps their rows; a
-// resumed conversation's stored rows can still read running, since the end of a conversation
-// stops its reviews without recording it. A Gemini run's directory stays on disk.
-// `$.state` only: during an in-process /resume, `$.session.id()` still names the conversation
-// left behind, so a store write would land under its key. Every restore marks the rows again.
-async function markOrphans($: Engine, failure: string): Promise<boolean> {
-  const orphans = (await read($, runs)).filter(r => r.status === 'running' && !stoppers.has(r.id))
-  if (orphans.length === 0) return false
-  for (const r of orphans) if (r.reviewer === 'gemini') await removeDir($, await runDirOf($, r.id))
-  const endedAt = await $.clock.now()
-  await update($, runs, list =>
-    list.map(r => (orphans.some(o => o.id === r.id) ? { ...r, status: 'cancelled' as const, endedAt, failure } : r)),
-  )
-  return true
+// A run whose child went with its conversation's process or with the module a reload replaced,
+// and whose conversation has not been told yet. It stays running in the ledger until a notice
+// naming it has entered, so every path that sends none leaves it for the next resume or reload.
+const isStopped = (r: Run) => r.status === 'running' && !stoppers.has(r.id)
+
+// Gives each stopped run that has no cause this one, in `$.state`. The first cause recorded stays,
+// so a retry reports what first stopped the run. A stopped Gemini run's directory goes too, because
+// its reviewer process is gone; a row still waiting for its notice is recovered again later, and
+// removing a directory already removed is harmless. True when there is a stopped run; false, with
+// nothing written, once the conversation `gen` began in has ended.
+async function recoverStopped($: Engine, cause: string, gen: number): Promise<boolean> {
+  const written = await update($, runs, list => (gen === generation ? list.map(r => (isStopped(r) && r.failure === null ? { ...r, failure: cause } : r)) : list))
+  if (gen !== generation) return false
+  const stopped = written.filter(isStopped)
+  // Not awaited: the reload path saves the cause right after this returns, and waiting on cleanup
+  // would let a conversation end in between drop that save.
+  for (const r of stopped) if (r.reviewer === 'gemini') void runDirOf($, r.id).then(dir => removeDir($, dir)).catch(() => undefined)
+  return stopped.length > 0
 }
+
+// The generation of the stopped-run notice in flight: in a new process the resume hook starts one,
+// and the session.start that follows must not start another for the same runs.
+let reporting: number | null = null
+const BIND_POLL_MS = 250
+const BIND_WAIT_MS = 10_000
+
+// Tells conversation `sessionId` which of its reviews stopped, then saves them failed. Where a
+// prompt submitted during an in-process /resume lands is unspecified, and until the resume hook has
+// returned `$.session.id()` still names the conversation left, so it waits for the id first.
+async function reportStopped($: Engine, sessionId: string, gen: number): Promise<void> {
+  reporting = gen
+  try {
+    if (!(await returnsAtOnce($))) return
+    for (let waited = 0; (await $.session.id()) !== sessionId; waited += BIND_POLL_MS) {
+      if (waited >= BIND_WAIT_MS) return
+      await $.clock.sleep(BIND_POLL_MS)
+    }
+    // The cause marks a stopped run: a review_start begun meanwhile has a running row with no
+    // failure until its stopper is in place.
+    const stopped = (await read($, runs)).filter(r => isStopped(r) && r.failure !== null)
+    if (stopped.length === 0 || gen !== generation) return
+    const names = stopped.map(r => `${NAME[r.reviewer]} ${r.mode} review ${r.id}`)
+    const text = stopped
+      .map((r, i) => `${names[i]} did not finish. ${r.failure} Read it with review_results ${r.id}, and start it again with review_start if it is still needed.`)
+      .join('\n\n')
+    const sent = await $.prompt.submit({ text }).catch((err: unknown) => ({ drop: String(err) }))
+    if (sent.drop !== undefined) {
+      $.ui.toast(`${names.join(', ')} did not finish; ask Claude to read ${stopped.length === 1 ? 'it' : 'them'} with review_results.`)
+      return
+    }
+    if (gen !== generation || (await $.session.id()) !== sessionId) return
+    const endedAt = await $.clock.now()
+    const ids = new Set(stopped.map(r => r.id))
+    await change($, list => list.map(r => (ids.has(r.id) && r.status === 'running' ? { ...r, status: 'failed' as const, endedAt } : r)), gen)
+  } finally {
+    if (reporting === gen) reporting = null
+  }
+}
+
 // Claude reports a run's failure as its cause, so each names only its own.
 const RELOADED = "The plugin was loaded again while this review ran, which stopped it. Updating the plugin does this in the desktop app's open local sessions."
-const LEFT = "This conversation's Claude Code session ended while this review ran, which stopped it. Exiting Claude Code, leaving the conversation with /clear or /resume, and the desktop app ending an idle local session when too many are open or when it quits all do this."
 // What the app does in general, never a claim about one run: its pause ends the CLI process.
 const PAUSES = 'The Claude desktop app pauses idle conversations when memory runs low, which stops their reviews.'
 // By the reason the engine gave for the end of the conversation that stopped the run.
@@ -466,6 +511,18 @@ async function endSession($: Engine): Promise<void> {
   await update($, runs, () => [])
   await update($, selected, () => null)
   await update($, picker, () => null)
+}
+
+// Where nothing draws (a -p run, an SDK host) the session may end with the run, so review_start
+// waits for it and no message is sent; elsewhere it returns the run at once and the plugin
+// announces its end. The desktop app draws only while its session has focus, yet the session
+// outlives the run, so its entrypoint counts. A claude -p started under it inherits that
+// entrypoint; the markers Claude Code sets on its shells, hooks and MCP servers tell such a child
+// apart, but one started by a mod's process or an LSP server carries none, so its review is lost.
+async function returnsAtOnce($: Engine): Promise<boolean> {
+  const isDesktop = DESKTOP.includes((await $.env.get('CLAUDE_CODE_ENTRYPOINT')) ?? '')
+  const isChild = Boolean((await $.env.get('CLAUDE_CODE_CHILD_SESSION')) || (await $.env.get('CLAUDECODE')))
+  return (await $.session.surfaces()).length > 0 || (isDesktop && !isChild)
 }
 
 async function registerTools($: Engine, i: Installed): Promise<void> {
@@ -521,9 +578,12 @@ export const register: Register = on => {
     const gen = generation
     const started = await next(e)
     installed = null
-    // These rows are the current conversation's, so the cause is saved; a resume would otherwise
-    // read them as running and blame the conversation's end.
-    if (await markOrphans($, RELOADED)) await change($, list => list, gen)
+    // A reload stopped these rows' children. The cause is saved with the rows still running, so a
+    // resume before the notice has gone still reports the reload.
+    if (await recoverStopped($, RELOADED, gen)) {
+      await change($, list => list, gen)
+      if (reporting !== gen) void reportStopped($, await $.session.id(), gen)
+    }
     await registerTools($, await ensure($))
     // Pruning waits for the counts, so no ledger goes before its runs are counted.
     const counted = await countStored($).then(
@@ -604,15 +664,7 @@ export const register: Register = on => {
       if (/[\0\uFFFD]/.test(content)) return { deny: `${file} contains NUL or U+FFFD characters, as a file that is not UTF-8 text reads, so it cannot go into Gemini's prompt.` }
       texts.push(snapshot(file, content))
     }
-    // Where nothing draws (a -p run, an SDK host) the session may end with the run, so the call
-    // waits for it; elsewhere it returns the run at once and the plugin announces its end. The
-    // desktop app draws only while its session has focus, yet the session outlives the run, so
-    // its entrypoint counts. A claude -p started under it inherits that entrypoint; the markers
-    // Claude Code sets on its shells, hooks and MCP servers tell such a child apart, but one
-    // started by a mod's process or an LSP server carries none, so its review is lost.
-    const isDesktop = DESKTOP.includes((await $.env.get('CLAUDE_CODE_ENTRYPOINT')) ?? '')
-    const isChild = Boolean((await $.env.get('CLAUDE_CODE_CHILD_SESSION')) || (await $.env.get('CLAUDECODE')))
-    const isBackground = (await $.session.surfaces()).length > 0 || (isDesktop && !isChild)
+    const isBackground = await returnsAtOnce($)
     const { run: started, settled } = await startRun($, {
       reviewer: input.reviewer, mode: input.mode, question: input.question, instructions: input.instructions,
       text: texts.length > 0 ? texts.join('\n\n') : null, files, effort, model, exe,
