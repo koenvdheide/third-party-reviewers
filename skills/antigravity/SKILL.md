@@ -24,7 +24,7 @@ If this skill includes a discovery failure, report its diagnostic and follow the
 
 ## Model and effort
 
-Defaults: the newest Gemini Flash release on offer, with effort set from the mode. Override when requested or justified by the material: `model` takes a base ID without an effort suffix; `effort` takes `low`, `medium` or `high`. The tool requests `<model>-<effort>` without checking `agy models`, so pick an effort that model offers.
+Default to Gemini 4 Argon by passing `model: "gemini-4-argon"` to `review_start`, with effort set from the mode. Override when requested or justified by the material: `model` takes a base ID without an effort suffix; `effort` takes `low`, `medium` or `high`. The tool requests `<model>-<effort>` without checking `agy models`, so pick an effort that model offers.
 
 `agy` also serves `claude-*` models. Selecting one changes the requested model family: explain that before using it and proceed only if the user wants it. Label that result as same-family when Claude is the host.
 
