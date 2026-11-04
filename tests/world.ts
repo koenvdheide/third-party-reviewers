@@ -7,7 +7,7 @@ const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isSt
 
 const WINDOWS_CODEX_EXE = '/u/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'
 
-export function world(on: On, opts: { windows?: boolean; codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; failPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean | string; storeCap?: number; env?: Record<string, string> } = {}) {
+export function world(on: On, opts: { windows?: boolean; codex?: boolean; nativeCodex?: string; gemini?: boolean; catalogueError?: string; catalogue?: string; slowResolve?: boolean; slowSetup?: boolean; failWrite?: boolean; failRemove?: boolean; dropPrompts?: boolean; failPrompts?: boolean; holdPrompts?: boolean; failStore?: boolean | string; storeCap?: number; env?: Record<string, string> } = {}) {
   const clock = mock.clock(on)
   const work = '/work'
   const temp = '/tmp/tpr'
@@ -143,7 +143,7 @@ export function world(on: On, opts: { windows?: boolean; codex?: boolean; native
       return ok('codex-cli 0.159.3')
     }
     if (cmd === 'agy models' && opts.catalogueError) return { value: { exitCode: 1, stdout: '', stderr: opts.catalogueError, isStdoutTruncated: false, isStderrTruncated: false } }
-    if (cmd === 'agy models') return gemini ? ok('gemini-3.8-flash-high\tGemini 3.8 Flash (High)') : { deny: 'ENOENT: agy' }
+    if (cmd === 'agy models') return gemini ? ok(opts.catalogue ?? 'gemini-3.8-flash-high\tGemini 3.8 Flash (High)') : { deny: 'ENOENT: agy' }
     if (e.argv[0] === 'powershell.exe' || e.argv[0] === 'rm') {
       const dir = e.argv[0] === 'rm' ? e.argv[3] : e.init?.env?.TPR_DIR ?? ''
       if (w.holdRemove) await new Promise<void>(resolve => w.heldRemove.push(resolve))

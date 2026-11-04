@@ -35,6 +35,32 @@ const startTurn = ($: any) => $.turn.start({ text: 'go', turnId: 't1' })
 const endTurn = ($: any) => $.turn.complete({ answer: '', durationMs: 0, isAborted: false, turnId: 't1', reason: 'answer' })
 
 describe('runs', () => {
+  for (const { mode, override, expected } of [
+    { mode: 'red-team', override: undefined, expected: 'gemini-4-argon-high' },
+    { mode: 'explain', override: undefined, expected: 'gemini-4-argon-medium' },
+    { mode: 'red-team', override: 'gemini-3.8-flash', expected: 'gemini-3.8-flash-high' },
+  ]) {
+    test(`Gemini discovery selects ${expected} for ${mode}${override ? ' with override' : ''}`, async ($, on) => {
+      const w = world(on, { catalogue: 'gemini-4-argon-high\tArgon\ngemini-4-argon-medium\tArgon\ngemini-3.8-flash-high\tFlash' })
+      w.scripts.push({ lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
+      await boot($, w)
+      const r = JSON.parse((await call($, 'review_start', { ...start, reviewer: 'gemini', mode, ...(override ? { model: override } : {}) })).result)
+      expect(r.status).toBe('complete')
+      expect(r.model).toBe(expected)
+      expect(w.spawns[0]?.argv).toContain(expected)
+    })
+  }
+
+  test('an Argon-only catalogue enables the Gemini reviewer', async ($, on) => {
+    const w = world(on, { catalogue: 'gemini-4-argon-high\tArgon' })
+    w.scripts.push({ lines: [{ event: 'result', result: { status: 'SUCCESS', structured_output: { verdict: 'v', response: 'r', findings: [] } } }] })
+    await boot($, w)
+    const result = await call($, 'review_start', { ...start, reviewer: 'gemini' })
+    expect(result.deny).toBeUndefined()
+    expect(JSON.parse(result.result).status).toBe('complete')
+    expect(w.spawns[0]?.argv).toContain('gemini-4-argon-high')
+  })
+
   for (const windows of [false, true]) {
     test(`clean codex run (${windows ? 'Windows' : 'POSIX'}): returned complete, nothing submitted`, async ($, on) => {
       const w = world(on, { windows })

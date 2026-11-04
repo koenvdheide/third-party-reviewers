@@ -26,13 +26,13 @@ export function defaultEffort(reviewer: Reviewer, mode: string): string {
   return 'high'
 }
 
-// `agy models` prints "<id>\t<label>" per line; the newest Flash release is the default.
-export function newestFlash(listing: string): string | null {
+// `agy models` prints "<id>\t<label>" per line; the newest Gemini release is the default.
+export function newestGemini(listing: string): string | null {
   const found = listing
     .split(/\r?\n/)
     .flatMap(line => {
-      const m = (line.split('\t')[0] ?? '').trim().match(/^(gemini-(\d+)\.(\d+)-flash)-(?:low|medium|high)$/)
-      return m?.[1] ? [{ base: m[1], major: Number(m[2]), minor: Number(m[3]) }] : []
+      const m = (line.split('\t')[0] ?? '').trim().match(/^(gemini-(\d+)(?:\.(\d+))?-[A-Za-z0-9._-]+)-(?:low|medium|high)$/)
+      return m?.[1] ? [{ base: m[1], major: Number(m[2]), minor: Number(m[3] ?? 0) }] : []
     })
     .sort((a, b) => b.major - a.major || b.minor - a.minor)
   return found[0]?.base ?? null

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { Lines, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash, snapshot, validateReview } from '../hooks/cli'
+import { Lines, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestGemini, snapshot, validateReview } from '../hooks/cli'
 
 const finding = { severity: 'breakage', title: 'wrong operator', claim: 'a - b', file: 'probe.py', line: 2, symbol: 'add' }
 const review = { verdict: 'one bug', response: 'add subtracts', findings: [finding] }
@@ -16,10 +16,13 @@ describe('defaults', () => {
     expect(defaultEffort('gemini', 'red-team')).toBe('high')
     expect(defaultEffort('gemini', 'breakage-review')).toBe('high')
   })
-  test('newest flash from agy models', () => {
+  test('newest Gemini across families and numeric releases', () => {
+    expect(newestGemini('gemini-3.8-flash-high\tFlash\ngemini-4-argon-high\tArgon')).toBe('gemini-4-argon')
+    expect(newestGemini('gemini-4.9-pro-high\tG\ngemini-4.10-pro-medium\tG')).toBe('gemini-4.10-pro')
+    expect(newestGemini('gemini-4-argon-high\tG\nclaude-opus-99-high\tC')).toBe('gemini-4-argon')
     const listing = 'Fetching available models...\ngemini-3.7-flash-high\tG\ngemini-3.8-flash-low\tG\ngemini-3.1-pro-high\tG\nclaude-opus-5-5-high\tC'
-    expect(newestFlash(listing)).toBe('gemini-3.8-flash')
-    expect(newestFlash('nothing')).toBe(null)
+    expect(newestGemini(listing)).toBe('gemini-3.8-flash')
+    expect(newestGemini('nothing')).toBe(null)
   })
 })
 

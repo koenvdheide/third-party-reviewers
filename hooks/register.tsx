@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Finding, FindingStatus, Reviewer, Run } from '../types'
-import { AGY_AGENT_FILE, AGY_AGENT_TEXT, CODEX_MODEL, EFFORTS, Lines, NAME, SAFE_ID, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestFlash, snapshot } from './cli'
+import { AGY_AGENT_FILE, AGY_AGENT_TEXT, CODEX_MODEL, EFFORTS, Lines, NAME, SAFE_ID, agyArgv, agyInput, agyParser, buildPrompt, codexArgv, codexParser, defaultEffort, newestGemini, snapshot } from './cli'
 import type { Exe, Outcome, Parser, RawFinding } from './cli'
 import { STATUSES, applyOverrule, applyRecord, citationOf, findingOf, outcome, overrulePrompt, tallyOf } from './findings'
 import type { RecordResult } from './findings'
@@ -13,7 +13,7 @@ import { PANE, paneTree } from './pane'
 
 type Engine = EngineInterface
 type Stream = ReturnType<Engine['process']['spawn']>
-type Installed = { codex: Exe | null; gemini: { exe: Exe; flash: string } | null; errors: Record<Reviewer, string> }
+type Installed = { codex: Exe | null; gemini: { exe: Exe; model: string } | null; errors: Record<Reviewer, string> }
 
 const T = <N extends string>(name: N) => `mcp__third-party-reviewers__${name}` as const
 const BUTTON = 'external-review'
@@ -110,8 +110,8 @@ async function resolveCodex($: Engine): Promise<Exe | null> {
 async function resolveGemini($: Engine): Promise<Installed['gemini']> {
   const exe: Exe = { argv: ['agy'] }
   const listing = await probe($, exe, ['models'])
-  const flash = newestFlash(listing)
-  return flash === null ? null : { exe, flash }
+  const model = newestGemini(listing)
+  return model === null ? null : { exe, model }
 }
 
 async function ensure($: Engine): Promise<Installed> {
@@ -122,7 +122,7 @@ async function ensure($: Engine): Promise<Installed> {
       gemini: gemini.status === 'fulfilled' ? gemini.value : null,
       errors: {
         codex: codex.status === 'rejected' ? String(codex.reason).slice(-2000) : 'No runnable Codex executable was found.',
-        gemini: gemini.status === 'rejected' ? String(gemini.reason).slice(-2000) : 'agy models returned no supported Gemini Flash model.',
+        gemini: gemini.status === 'rejected' ? String(gemini.reason).slice(-2000) : 'agy models returned no supported Gemini model.',
       },
     }
   }
@@ -685,7 +685,7 @@ export const register: Register = on => {
     const effort = input.effort ?? defaultEffort(input.reviewer, input.mode)
     if (!EFFORTS[input.reviewer].includes(effort)) return { deny: `Effort ${effort} is not allowed for ${NAME[input.reviewer]}; use one of ${EFFORTS[input.reviewer].join(', ')}.` }
     if (input.model !== undefined && !SAFE_ID.test(input.model)) return { deny: `The model id ${JSON.stringify(input.model)} has characters a model id never has.` }
-    const model = input.reviewer === 'codex' ? (input.model ?? CODEX_MODEL) : `${input.model ?? i.gemini?.flash}-${effort}`
+    const model = input.reviewer === 'codex' ? (input.model ?? CODEX_MODEL) : `${input.model ?? i.gemini?.model}-${effort}`
     const files = input.artifact?.files ?? []
     const texts = input.artifact?.text === undefined ? [] : [input.artifact.text]
     for (const file of files) {

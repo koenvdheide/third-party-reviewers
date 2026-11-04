@@ -43,7 +43,7 @@ The plugin is a mod, code that Claude Code runs. It has no server and makes no n
 
 - A Codex review, in the session's working directory, with the review prompt on standard input: `codex exec --json --output-schema <plugin>/schemas/review.schema.json -s read-only -m <model> -c model_reasoning_effort=<effort> -c web_search=live -c model_reasoning_summary=concise --ephemeral`, plus `--skip-git-repo-check` outside a git repository.
 - A Gemini review, in a temporary directory, with the review prompt on standard input as one JSON line: `agy --print= --input-format stream-json --output-format stream-json --json-schema <plugin>/schemas/review.schema.json --agent tpr-reviewer --model <model>`.
-- When a session starts, to find the CLIs and pick the newest supported Gemini Flash model: `codex --version` and `agy models`. On Windows it runs `where.exe codex` first, then `--version` on the `codex.exe` it finds, on `PATH` or in npm's Codex installation (that one with the `CODEX_MANAGED_BY_NPM` and `CODEX_MANAGED_PACKAGE_ROOT` variables npm's launcher sets).
+- When a session starts, to find the CLIs and pick the newest supported Gemini model: `codex --version` and `agy models`. On Windows it runs `where.exe codex` first, then `--version` on the `codex.exe` it finds, on `PATH` or in npm's Codex installation (that one with the `CODEX_MANAGED_BY_NPM` and `CODEX_MANAGED_PACKAGE_ROOT` variables npm's launcher sets).
 - To delete a Gemini review's temporary directory: `rm -rf -- <dir>`, or on Windows `powershell.exe -NoProfile -NonInteractive -Command "Remove-Item -LiteralPath $env:TPR_DIR -Recurse -Force"` with the directory in `TPR_DIR`.
 
 ### What it sends, and where
