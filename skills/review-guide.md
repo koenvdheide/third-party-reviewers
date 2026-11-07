@@ -19,7 +19,7 @@ Call `review_start` following the selected provider's skill:
 - `reviewer`: that skill's provider.
 - `mode`: a catalogue identifier.
 - `question`: the concrete question.
-- `instructions`: the matching mode instructions, original brief, constraints and relevant prior dispositions. State constraints as facts; separate your preferred answer.
+- `instructions`: the matching mode instructions, original brief, constraints and relevant prior dispositions. State constraints as facts; separate your preferred answer. When a `red-team`, `simplify`, `churn-review`, `plan-review` or `diff-review` covers a plan, diff or code that adds or changes interface text, add the UI Density instructions as well.
 - `artifact`: `text` for inline material; `files` for absolute paths. Prefer existing files under the provider's delivery rules. For diffs, supply diff text and files whose current state matters.
 - `model`, `effort`: omit for tool defaults, or override as the provider's skill permits; shared modes do not imply shared model or effort settings.
 
@@ -51,6 +51,7 @@ Use `simplify` for complexity in a design or working system; `churn-review` for 
 | `attack-surface` | Overlooked entry points and weaknesses; scope, trust boundaries, known patterns and dead ends. |
 | `exhausted-hypotheses` | New security hypotheses; scope, coverage, existing hypotheses and dead ends. |
 | `prose` | A draft's accuracy and clarity; the draft, intended reader, purpose and supporting sources. |
+| `ui-density` | Text and structure an interface can lose; the rendered text and heading outline of each screen, its source files, its users and the tasks it serves. |
 
 ### Mode instructions
 
@@ -94,6 +95,7 @@ Order findings by costs removed in understanding, review and change. Prefer proj
 - **Attack Surface**: "Identify overlooked entry points and vulnerability classes, including logic flaws, trust boundaries, races, and chained weaknesses. Prioritise by likelihood and impact. Name the tenant isolation broken and the data or actions exposed."
 - **Exhausted Hypotheses**: "Find security hypotheses absent from the supplied dead ends and existing hypotheses. For each: exact file:line, concrete attack steps, impact if exploitable, and why a systematic review missed it."
 - **Prose**: "Review the draft against its intended reader, purpose and supplied sources. Flag unsupported or overstated claims, unclear reasoning, missing information the reader needs, and wording that can be cut without losing meaning. Distinguish factual errors from editorial preferences. Cite the passage and its supporting or contradicting source where available; identify claims that cannot be verified from the supplied evidence. Preserve the author's voice and propose the smallest correction."
+- **UI Density**: "Review the interface as a user scanning it to act. Flag sentences that restate a heading, label, button or another sentence; headers and subheaders that label a single item, repeat their parent or the page title, or group nothing; and detail the user cannot act on, such as implementation notes, instructions for standard controls, and counts or metadata with no decision attached. Keep text the stated tasks need, text that prevents an error or explains a consequence, and headers that aid navigation, grouping or identifying a control; say when the text cannot settle whether a header does. In the claim of each finding about the interface, name the screen and quote the element's visible text, adding its section where that text repeats; say what to cut or merge, and where its information survives or that the tasks do without it. If the interface is already lean, say so."
 
 ## Handling results
 

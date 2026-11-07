@@ -15,8 +15,8 @@ export const EFFORTS: Record<Reviewer, readonly string[]> = {
 }
 
 const MEDIUM: Record<Reviewer, readonly string[]> = {
-  codex: ['explain', 'spec-extraction', 'test-gaps', 'prose'],
-  gemini: ['explain', 'prose'],
+  codex: ['explain', 'spec-extraction', 'test-gaps', 'prose', 'ui-density'],
+  gemini: ['explain', 'prose', 'ui-density'],
 }
 const TOP = ['breakage-review', 'red-team', 'plan-review', 'attack-surface', 'exhausted-hypotheses']
 
@@ -79,8 +79,8 @@ export function buildPrompt(p: PromptParts): string {
   if (p.text !== null) out.push(`<<<ARTIFACT BEGIN:${p.nonce}>>>`, p.text, `<<<ARTIFACT END:${p.nonce}>>>`, '')
   out.push(p.instructions, '')
   if (p.mode === 'breakage-review') out.push(BREAKAGE_SCOPE, '')
-  if (p.mode !== 'explain') out.push(OWNERSHIP, '')
-  if (p.mode !== 'strategic-review') out.push(SIMPLICITY, '')
+  if (p.mode !== 'explain' && p.mode !== 'ui-density') out.push(OWNERSHIP, '')
+  if (p.mode !== 'strategic-review' && p.mode !== 'ui-density') out.push(SIMPLICITY, '')
   out.push(RETURN)
   return out.join('\n')
 }

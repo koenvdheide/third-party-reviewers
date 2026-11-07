@@ -33,6 +33,7 @@ Prompts that work:
 - "Have Gemini check my uncommitted changes for breakage."
 - "Get Codex's view on why this test only fails on Windows."
 - "Ask Gemini for a strategic review of src/parser: is it structured for the next file format?"
+- "Ask Codex to check the dashboard page for redundant text and headers."
 - "Review this branch with Codex until convergence."
 
 ## What it runs, sends and writes

@@ -11,7 +11,9 @@ describe('defaults', () => {
     expect(defaultEffort('codex', 'red-team')).toBe('xhigh')
     expect(defaultEffort('codex', 'breakage-review')).toBe('xhigh')
     expect(defaultEffort('codex', 'diff-review')).toBe('high')
+    expect(defaultEffort('codex', 'ui-density')).toBe('medium')
     expect(defaultEffort('gemini', 'explain')).toBe('medium')
+    expect(defaultEffort('gemini', 'ui-density')).toBe('medium')
     expect(defaultEffort('gemini', 'test-gaps')).toBe('high')
     expect(defaultEffort('gemini', 'red-team')).toBe('high')
     expect(defaultEffort('gemini', 'breakage-review')).toBe('high')
@@ -51,6 +53,11 @@ describe('prompt', () => {
     const p = buildPrompt({ mode: 'strategic-review', question: 'Q?', instructions: 'Judge the structure.', text: 'body', files: [], nonce: 'n3' })
     expect(p).not.toContain('Simplicity bar:')
     expect(p).toContain('Answer in JSON matching the schema')
+  })
+  test('ui density drops both code checklists', () => {
+    const p = buildPrompt({ mode: 'ui-density', question: 'Q?', instructions: 'Trim the screen.', text: 'body', files: [], nonce: 'n4' })
+    expect(p).not.toContain('Architectural ownership:')
+    expect(p).not.toContain('Simplicity bar:')
   })
   test('snapshot numbers lines as citations count them', () => {
     expect(snapshot('/a.ts', 'one\r\ntwo')).toBe('File /a.ts:\n1| one\n2| two')
